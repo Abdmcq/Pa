@@ -1,23 +1,29 @@
 {
-  "name": "telegram-whisper-bot-telegraf",
+  "name": "telegram-pdf-mcq-bot",
   "version": "1.0.0",
-  "description": "A Telegram whisper bot with inline mode functionality, rewritten using Telegraf.",
-  "main": "index.js",
+  "description": "A Telegram bot to extract text from PDFs and generate MCQs using Gemini API.",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js"
   },
   "keywords": [
     "telegram",
     "bot",
-    "whisper",
-    "inline",
-    "node.js",
+    "pdf",
+    "mcq",
+    "gemini",
+    "nodejs",
     "telegraf"
   ],
-  "author": "Your Name",
-  "license": "MIT",
+  "author": "Abdurahman Hassan",
+  "license": "ISC",
   "dependencies": {
-    "telegraf": "^4.16.2",
+    "axios": "^1.7.2",
+    "luxon": "^3.4.4",
+    "pdf-lib": "^1.17.1",
+    "pdf-parse": "^1.1.1",
+    "telegraf": "^4.16.1",
+    "telegraf-session-local": "^2.1.1",
     "uuid": "^10.0.0"
   }
 }
