@@ -1,6 +1,6 @@
 {
-  "name": "telegram-audio-metadata-bot",
-  "version": "1.0.0",
+  "name": "telegram-audio-bot-advanced",
+  "version": "1.1.0",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "form-data": "^4.0.0",
     "node-fetch": "^3.3.2",
     "node-id3": "^0.2.0",
-    "telegraf": "^4.12.2"
+    "telegraf": "^4.12.2",
+    "fluent-ffmpeg": "^2.1.2"
   }
 }
