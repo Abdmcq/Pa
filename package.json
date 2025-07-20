@@ -1,7 +1,7 @@
 {
-  "name": "telegram-mcq-bot",
+  "name": "telegram-whisper-bot",
   "version": "1.0.0",
-  "description": "A Telegram bot to generate MCQ questions from lecture files using Google Gemini AI.",
+  "description": "A Telegram whisper bot with inline mode functionality, similar to the Python version.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,18 +9,15 @@
   "keywords": [
     "telegram",
     "bot",
-    "mcq",
-    "gemini",
-    "ai",
-    "node.js",
-    "render"
+    "whisper",
+    "inline",
+    "node.js"
   ],
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "@google/generative-ai": "^0.15.0",
-    "axios": "^1.7.2",
-    "node-telegram-bot-api": "^0.66.0"
+    "node-telegram-bot-api": "^0.66.0",
+    "uuid": "^10.0.0"
   }
 }
 
