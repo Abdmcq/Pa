@@ -1,6 +1,6 @@
 // استيراد مكتبة Telegraf
 const { Telegraf, Markup } = require('telegraf'); // استيراد Markup لإنشاء الأزرار
-const crypto = require('crypto'); // لاستخدام crypto.randomUUID() لتوليد معرفات فريدة
+const crypto = require('crypto'); // لاستخدام crypto.randomBytes لتوليد معرفات فريدة
 
 // توكن البوت الخاص بك (تم تضمينه بناءً على طلبك)
 // يرجى ملاحظة أنه في بيئات الإنتاج، يفضل استخدام متغيرات البيئة لتخزين التوكن
@@ -11,125 +11,139 @@ const bot = new Telegraf(BOT_TOKEN);
 
 // تخزين مؤقت للهمسات السرية في الذاكرة
 // يتم فقدان هذه الهمسات عند إعادة تشغيل البوت.
-// Map<secretId, { message: string, recipientId: number, senderId: number, chatId: number, sentMessageId: number }>
+// Map<secretId, { message: string, recipientId: number, senderId: number, senderName: string }>
 const secretMessages = new Map();
 
 // معالج أمر /start
 // عندما يرسل المستخدم /start، سيقوم البوت بالرد برسالة ترحيب
 bot.start((ctx) => {
-    ctx.reply('أهلاً بك في بوت همسة! أنا هنا لأهمس لك ببعض الكلمات اللطيفة.\n\nلاستخدام الهمسة السرية في المجموعات، اكتب:\n`/secret @اسم_المستخدم همستك السرية هنا`\nأو\n`/secret معرف_المستخدم_الرقمي همستك السرية هنا`');
+    ctx.reply('أهلاً بك في بوت همسة! أنا هنا لأهمس لك ببعض الكلمات اللطيفة.\n\nلاستخدام الهمسة السرية في أي محادثة، اكتب اسم البوت (@اسم_البوت_الخاص_بك) ثم:\n`@اسم_المستخدم همستك السرية هنا`\nأو\n`معرف_المستخدم_الرقمي همستك السرية هنا`\n\nمثال: `@' + ctx.botInfo.username + ' @YourFriendUsername هذه همسة سرية لك!`\n\nبعد كتابة الهمسة، اختر النتيجة وسيتم نشر رسالة. اضغط على الزر لفتح الهمسة كإشعار منبثق.');
+});
+
+// معالج الرسائل النصية العامة (لأي رسائل ليست أوامر أو استدعاءات)
+// هذا المعالج سيتجاهل الرسائل التي تبدأ بـ '@' (لأنها قد تكون استدعاءات للبوت في وضع Inline)
+bot.on('text', (ctx) => {
+    const userMessage = ctx.message.text;
+    // إذا كانت الرسالة تبدأ بـ '@' وتتضمن اسم البوت، فمن المحتمل أنها استدعاء Inline أو Mention، نتجاهلها هنا
+    if (userMessage.startsWith('@') && userMessage.includes(ctx.botInfo.username)) {
+        return;
+    }
+    console.log(`رسالة جديدة من ${ctx.from.first_name} (${ctx.from.id}): ${userMessage}`);
+
+    // يمكنك إضافة المزيد من المنطق هنا للردود المختلفة
+    if (userMessage.includes('كيف حالك')) {
+        ctx.reply('أنا بخير طالما أنك بخير يا صديقي!');
+    } else if (userMessage.includes('شكرا')) {
+        ctx.reply('العفو، يسعدني أن أكون في خدمتك!');
+    } else {
+        ctx.reply('همسة لك: تذكر أنك رائع! إذا احتجت أي شيء، فقط اسأل.');
+    }
 });
 
 /**
- * معالج أمر /secret لإرسال رسائل سرية ضمن المجموعة.
- * لاستخدام هذا الأمر:
- * اكتب /secret @اسم_المستخدم <الهمسة السرية>
- * أو
- * اكتب /secret <معرف_المستخدم_الرقمي> <الهمسة السرية>
- *
- * مثال: /secret @john_doe هذه رسالة سرية لك وحدك!
- * مثال: /secret 123456789 هذه رسالة سرية لك وحدك!
+ * معالج استعلامات الوضع المضمن (Inline Mode).
+ * يتم استدعاؤه عندما يكتب المستخدم @اسم_البوت_الخاص_بك في أي محادثة.
  */
-bot.command('secret', async (ctx) => {
+bot.on('inline_query', async (ctx) => {
+    const query = ctx.inlineQuery.query.trim();
     const senderId = ctx.from.id;
     const senderName = ctx.from.first_name || ctx.from.username || 'مستخدم مجهول';
-    const messageText = ctx.message.text;
-    const chatId = ctx.chat.id;
-    const chatType = ctx.chat.type;
 
-    // يجب أن يكون الأمر في مجموعة
-    if (chatType === 'private') {
-        return ctx.reply('لا يمكن استخدام أمر /secret إلا في المجموعات لإرسال همسات سرية للآخرين.');
+    // تقسيم الاستعلام إلى معرف المستلم والرسالة السرية
+    const parts = query.split(' ');
+    if (parts.length < 2) {
+        // إذا كان الاستعلام غير مكتمل، اعرض تلميحاً
+        return ctx.answerInlineQuery([], {
+            cache_time: 0, // لا تخزن مؤقتاً
+            is_personal: true, // النتائج شخصية للمستخدم
+            // زر "Switch to PM" يوجه المستخدم إلى محادثة خاصة مع البوت
+            // مع بارامتر 'start' ليتم إرسال /start
+            switch_pm_text: 'كيفية استخدام همسة سرية (اضغط هنا للمساعدة)',
+            switch_pm_parameter: 'start'
+        });
     }
 
-    // تقسيم الرسالة لاستخراج المعرف والهمسة
-    const args = messageText.split(' ').slice(1); // إزالة '/secret' من بداية الرسالة
-    if (args.length < 2) {
-        return ctx.reply('صيغة الأمر خاطئة. الاستخدام الصحيح: `/secret @اسم_المستخدم أو معرف_المستخدم_الرقمي ثم رسالتك السرية.`', { reply_to_message_id: ctx.message.message_id });
-    }
-
-    let targetIdentifier = args[0]; // @username أو معرف المستخدم
-    const secretContent = args.slice(1).join(' '); // بقية الرسالة هي الهمسة السرية
+    let targetIdentifier = parts[0]; // @username أو معرف المستخدم الرقمي
+    const secretContent = parts.slice(1).join(' '); // بقية الاستعلام هي الهمسة السرية
 
     let recipientId;
     let recipientName = 'المستلم'; // اسم افتراضي للمستلم
 
-    // محاولة استخراج معرف المستخدم من @mention
-    if (ctx.message.entities) {
-        const mentionEntity = ctx.message.entities.find(e => e.type === 'mention' || e.type === 'text_mention');
-        if (mentionEntity) {
-            if (mentionEntity.user) { // إذا كان المستخدم معروفاً للبوت (مثلاً تفاعل معه سابقاً)
-                recipientId = mentionEntity.user.id;
-                recipientName = mentionEntity.user.first_name || mentionEntity.user.username || 'المستلم';
-            } else { // إذا كان مجرد @mention ولم يتمكن البوت من الحصول على ID
-                // لا يمكن للبوت الحصول على ID المستخدم من مجرد @mention إلا إذا كان قد تفاعل مع البوت سابقاً.
-                const username = messageText.substring(mentionEntity.offset + 1, mentionEntity.offset + mentionEntity.length);
-                return ctx.reply(`عذراً، لا يمكنني تحديد معرف المستخدم لـ @${username}. يرجى التأكد من أن هذا المستخدم قد بدأ محادثة معي مسبقاً (عن طريق إرسال /start لي في الخاص) أو استخدم المعرف الرقمي للمستخدم.`, { reply_to_message_id: ctx.message.message_id });
-            }
-        }
-    }
-
-    // إذا لم يتم العثور على mention، حاول تحليل المعرف الرقمي
-    if (!recipientId) {
+    // محاولة تحليل المعرف
+    if (targetIdentifier.startsWith('@')) {
+        // هذا هو اسم مستخدم. لا يمكن للبوت الحصول على ID المستخدم من مجرد @mention
+        // في وضع Inline إلا إذا كان المستخدم قد تفاعل مع البوت مسبقاً.
+        // لذلك، سنوجه المستخدم إلى استخدام المعرف الرقمي أو طلب من المستلم بدء محادثة مع البوت.
+        return ctx.answerInlineQuery([], {
+            cache_time: 0,
+            is_personal: true,
+            switch_pm_text: `لا يمكن تحديد ID لـ ${targetIdentifier}. يرجى استخدام المعرف الرقمي للمستخدم.`,
+            switch_pm_parameter: 'start'
+        });
+    } else {
+        // محاولة تحليل المعرف الرقمي
         const parsedId = parseInt(targetIdentifier);
         if (!isNaN(parsedId)) {
             recipientId = parsedId;
-            // لا يمكننا الحصول على اسم المستلم من المعرف الرقمي مباشرة هنا، سيبقى "المستلم"
+            // لا يمكننا الحصول على اسم المستلم من المعرف الرقمي مباشرة في Inline Mode
+            // لذلك سنعرض "المستخدم [المعرف الرقمي]"
+            recipientName = `المستخدم ${targetIdentifier}`;
         } else {
-            return ctx.reply('الرجاء تحديد @اسم_المستخدم أو معرف_المستخدم_الرقمي الصحيح.', { reply_to_message_id: ctx.message.message_id });
+            return ctx.answerInlineQuery([], {
+                cache_time: 0,
+                is_personal: true,
+                switch_pm_text: 'صيغة خاطئة. استخدم: @اسم_المستخدم أو معرف_المستخدم_الرقمي ثم الهمسة.',
+                switch_pm_parameter: 'start'
+            });
         }
     }
 
     // لا تسمح للمستخدم بإرسال همسة سرية لنفسه
     if (recipientId === senderId) {
-        return ctx.reply('لا يمكنك إرسال همسة سرية لنفسك!', { reply_to_message_id: ctx.message.message_id });
+        return ctx.answerInlineQuery([], {
+            cache_time: 0,
+            is_personal: true,
+            switch_pm_text: 'لا يمكنك إرسال همسة سرية لنفسك!',
+            switch_pm_parameter: 'start'
+        });
     }
 
-    // توليد معرف فريد للهمسة
-    const secretId = crypto.randomUUID();
+    // توليد معرف فريد للهمسة (32 حرفاً سداسي عشري)
+    const secretId = crypto.randomBytes(16).toString('hex');
 
     // تخزين الهمسة مؤقتاً
     secretMessages.set(secretId, {
         message: secretContent,
         recipientId: recipientId,
         senderId: senderId,
-        chatId: chatId,
-        originalMessageId: ctx.message.message_id // لتتبع الرسالة الأصلية التي تحتوي على الأمر
+        senderName: senderName // تخزين اسم المرسل لسهولة العرض لاحقاً
     });
 
     // إنشاء زر inline يسمح فقط للمستلم بفتحه
     const keyboard = Markup.inlineKeyboard([
-        Markup.button.callback('افتح الهمسة 🤫', `open_secret:${secretId}:${recipientId}`)
+        Markup.button.callback('افتح الهمسة 🤫', `open_secret_popup:${secretId}:${recipientId}`)
     ]);
 
-    try {
-        // إرسال رسالة عامة في المجموعة مع الزر
-        const sentMessage = await ctx.reply(`همسة سرية جديدة من ${senderName} لـ ${recipientName || 'المستلم'}!`, keyboard);
+    // إعداد نتيجة Inline Query
+    const results = [{
+        type: 'article',
+        id: secretId, // معرف فريد للنتيجة
+        title: `إرسال همسة سرية لـ ${recipientName}`,
+        description: `الهمسة: "${secretContent.substring(0, 50)}${secretContent.length > 50 ? '...' : ''}"`,
+        input_message_content: {
+            // هذا هو المحتوى الذي سيتم إرساله إلى الدردشة عند اختيار النتيجة
+            message_text: `همسة سرية جديدة من ${senderName} لـ ${recipientName}!\n\nاضغط على الزر لفتح الهمسة.`,
+            parse_mode: 'Markdown' // Markdown can be used here if you want to format the message
+        },
+        reply_markup: keyboard,
+        thumb_url: 'https://placehold.co/48x48/000000/FFFFFF?text=🤫' // أيقونة صغيرة للنتيجة
+    }];
 
-        // تحديث معلومات الرسالة الأصلية في secretMessages لتشمل معرف الرسالة التي تم إرسالها
-        const secretData = secretMessages.get(secretId);
-        if (secretData) {
-            secretData.sentMessageId = sentMessage.message_id;
-            secretMessages.set(secretId, secretData);
-        }
-
-        // محاولة حذف رسالة الأمر الأصلية من المجموعة للحفاظ على سريتها
-        // ملاحظة: يتطلب هذا أن يكون البوت مسؤولاً في المجموعة ولديه صلاحية "حذف الرسائل".
-        try {
-            await ctx.deleteMessage(ctx.message.message_id);
-        } catch (deleteError) {
-            console.warn(`لم يتمكن البوت من حذف رسالة الأمر الأصلية (${ctx.message.message_id}) في الدردشة ${chatId}. قد لا يمتلك البوت صلاحية حذف الرسائل.`, deleteError.message);
-        }
-
-    } catch (error) {
-        console.error('خطأ عند إرسال رسالة الهمسة السرية في المجموعة:', error);
-        ctx.reply('عذراً، حدث خطأ ما أثناء إرسال الهمسة السرية. يرجى المحاولة مرة أخرى لاحقاً.', { reply_to_message_id: ctx.message.message_id });
-    }
+    await ctx.answerInlineQuery(results, { cache_time: 0, is_personal: true });
 });
 
-// معالج استدعاءات الأزرار (callback queries)
-bot.action(/open_secret:(.+):(\d+)/, async (ctx) => {
-    const callbackData = ctx.match[0]; // open_secret:secretId:recipientId
+// معالج استدعاءات الأزرار (callback queries) لفتح الهمسة كإشعار منبثق
+bot.action(/open_secret_popup:(.+):(\d+)/, async (ctx) => {
     const secretId = ctx.match[1];
     const expectedRecipientId = parseInt(ctx.match[2]);
     const userId = ctx.from.id;
@@ -140,53 +154,48 @@ bot.action(/open_secret:(.+):(\d+)/, async (ctx) => {
     if (!secretData) {
         // إذا لم يتم العثور على الهمسة (ربما تم إعادة تشغيل البوت أو انتهت صلاحيتها)
         await ctx.answerCbQuery('عذراً، هذه الهمسة لم تعد متاحة أو انتهت صلاحيتها.', { show_alert: true });
-        // يمكننا محاولة تعديل الرسالة لإزالة الزر
-        try {
-            await ctx.editMessageText('هذه الهمسة لم تعد متاحة.');
-        } catch (editError) {
-            console.warn('فشل في تعديل رسالة الهمسة المنتهية الصلاحية:', editError.message);
-        }
         return;
     }
 
     // التحقق مما إذا كان المستخدم الذي ضغط على الزر هو المستلم المقصود
     if (userId === expectedRecipientId) {
-        // المستلم الصحيح، قم بالكشف عن الهمسة
+        // المستلم الصحيح، قم بالكشف عن الهمسة في إشعار منبثق
         const secretMessage = secretData.message;
-        let senderDisplayName = 'المرسل'; // اسم افتراضي للمرسل
-        try {
-            // محاولة الحصول على اسم المرسل من المجموعة للحصول على اسم أكثر دقة
-            const senderChatMember = await bot.telegram.getChatMember(secretData.chatId, secretData.senderId);
-            senderDisplayName = senderChatMember.user.first_name || senderChatMember.user.username || 'المرسل';
-        } catch (e) {
-            console.warn(`لم يتمكن من الحصول على معلومات المرسل (${secretData.senderId}):`, e.message);
-        }
+        const senderDisplayName = secretData.senderName; // استخدم الاسم المخزن من inline_query
 
         try {
-            // تعديل الرسالة في المجموعة للكشف عن الهمسة
-            // سيتم عرض هذا التعديل لكل من في المجموعة، ولكن الرسالة تشير إلى أنها خاصة.
-            await ctx.editMessageText(`همسة سرية من ${senderDisplayName} لـ ${userName}:\n\n"${secretMessage}"\n\n(هذه الهمسة مرئية لك فقط!)`);
-            await ctx.answerCbQuery('تم فتح الهمسة بنجاح!', { show_alert: false });
+            // عرض الهمسة كإشعار منبثق (pop-up)
+            await ctx.answerCbQuery(`همسة سرية من ${senderDisplayName}:\n\n"${secretMessage}"`, { show_alert: true });
 
-            // يمكننا إزالة الهمسة من الذاكرة بعد عرضها لمنع إعادة فتحها أو للحفاظ على الذاكرة
-            // secretMessages.delete(secretId); // قم بإلغاء التعليق إذا أردت أن تُفتح الهمسة مرة واحدة فقط
+            // إزالة الهمسة من الذاكرة بعد عرضها لمنع إعادة فتحها
+            secretMessages.delete(secretId);
 
-            // إضافة مؤقت لإعادة إخفاء الرسالة بعد فترة (مثلاً 60 ثانية)
-            setTimeout(async () => {
-                try {
-                    // إعادة الرسالة إلى حالتها الأصلية مع الزر
-                    await ctx.editMessageText(`همسة سرية جديدة من ${senderDisplayName} لـ ${userName}!`, Markup.inlineKeyboard([
-                        Markup.button.callback('افتح الهمسة 🤫', `open_secret:${secretId}:${expectedRecipientId}`)
-                    ]));
-                    // إذا أردت حذف الهمسة من الذاكرة بعد إخفائها:
-                    secretMessages.delete(secretId);
-                } catch (rehideError) {
-                    console.warn('فشل في إعادة إخفاء الهمسة:', rehideError.message);
+            // يمكنك هنا تعديل الرسالة في الدردشة لإزالة الزر بعد الفتح
+            // مثال:
+            try {
+                // إذا كانت الرسالة من Inline Query (وليس من أمر /secret في مجموعة)
+                if (ctx.callbackQuery.inline_message_id) {
+                    await ctx.editMessageReplyMarkup({
+                        inline_message_id: ctx.callbackQuery.inline_message_id,
+                        reply_markup: Markup.inlineKeyboard([
+                             Markup.button.callback('تم فتح الهمسة ✅', 'secret_opened') // زر غير قابل للضغط أو مؤشر
+                        ])
+                    });
+                } else if (ctx.callbackQuery.message) { // إذا كانت رسالة عادية (ليست inline)
+                    await ctx.editMessageReplyMarkup({
+                        chat_id: ctx.chat.id,
+                        message_id: ctx.callbackQuery.message.message_id,
+                        reply_markup: Markup.inlineKeyboard([
+                            Markup.button.callback('تم فتح الهمسة ✅', 'secret_opened')
+                        ])
+                    });
                 }
-            }, 60000); // إخفاء بعد 60 ثانية (1 دقيقة)
+            } catch (editError) {
+                console.warn('فشل في تعديل زر الهمسة بعد الفتح:', editError.message);
+            }
 
         } catch (error) {
-            console.error('خطأ عند تعديل الرسالة للكشف عن الهمسة:', error);
+            console.error('خطأ عند عرض الهمسة كإشعار منبثق:', error);
             await ctx.answerCbQuery('عذراً، حدث خطأ أثناء فتح الهمسة.', { show_alert: true });
         }
     } else {
@@ -195,10 +204,15 @@ bot.action(/open_secret:(.+):(\d+)/, async (ctx) => {
     }
 });
 
+// معالج لأي أزرار "تم فتح الهمسة" لمنع أي تفاعل إضافي
+bot.action('secret_opened', async (ctx) => {
+    await ctx.answerCbQuery('لقد تم فتح هذه الهمسة بالفعل.', { show_alert: false });
+});
+
 // معالج الأخطاء العام للبوت
 bot.catch((err, ctx) => {
     console.error(`خطأ للبوت ${ctx.updateType} في الدردشة ${ctx.chat ? ctx.chat.id : 'N/A'}:`, err);
-    // يمكن هنا إضافة منطق تسجيل الأخطاء أو إرسال إشعار للمطور
+    // يمكنك هنا إضافة منطق تسجيل الأخطاء أو إرسال إشعار للمطور
     if (ctx.chat) {
         ctx.reply('عذراً، حدث خطأ ما. يرجى المحاولة مرة أخرى لاحقاً.');
     }
