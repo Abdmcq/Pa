@@ -1,89 +1,66 @@
-// استيراد مكتبة Telegraf لإنشاء بوت تليجرام
-const { Telegraf } = require('telegraf');
-// استيراد مكتبة GoogleGenerativeAI للتفاعل مع نموذج Gemini AI
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// استيراد مكتبة Telegram Bot API
+const TelegramBot = require('node-telegram-bot-api');
+// استيراد مكتبة تنزيل محتوى انستغرام
+const instagramDl = require('instagram-url-dl');
 
-// *** المتغيرات الشخصية الخاصة بك ***
-// توكن بوت تليجرام الخاص بك
-// يرجى ملاحظة: في بيئات الإنتاج، يفضل استخدام متغيرات البيئة (environment variables) بدلاً من تضمينها مباشرة في الكود لأسباب أمنية.
-const BOT_TOKEN = '7892395794:AAHy-_f_ej0IT0ZLF1jzdXJDMccLiCrMrZA';
-// مفتاح API الخاص بنموذج Gemini AI
-const GEMINI_API_KEY = 'AIzaSyCtGuhftV0VQCWZpYS3KTMWHoLg__qpO3g';
-// *** نهاية المتغيرات الشخصية ***
+// توكن البوت الخاص بك (تم تضمينه مباشرة كما طلبت)
+const token = '7892395794:AAHy-_f_ej0IT0ZLF1jzdXJDMccLiCrMrZA';
 
-// تهيئة بوت تليجرام باستخدام التوكن الخاص بك
-const bot = new Telegraf(BOT_TOKEN);
+// إنشاء مثيل جديد للبوت
+// 'polling' يخبر البوت بالتحقق بانتظام من وجود رسائل جديدة
+const bot = new TelegramBot(token, { polling: true });
 
-// تهيئة GoogleGenerativeAI باستخدام مفتاح الـ API الخاص بك
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+console.log('البوت يعمل...');
 
-// اختيار نموذج Gemini Pro
-// يمكنك تجربة نماذج أخرى إذا كانت متاحة وتناسب احتياجاتك
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+// الاستماع لجميع الرسائل الواردة
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const messageText = msg.text;
 
-// معالج الرسائل النصية
-// سيتم تشغيل هذا الكود عندما يرسل المستخدم أي رسالة نصية إلى البوت
-bot.on('text', async (ctx) => {
-    const userMessage = ctx.message.text; // الحصول على رسالة المستخدم
+    // تعبير عادي للتحقق مما إذا كان النص رابط ريلز انستغرام
+    // يدعم الروابط التي تبدأ بـ instagram.com/reel/ أو instagr.am/reel/
+    const instagramReelRegex = /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|instagr\.am)\/reel\/([a-zA-Z0-9_-]+)\/?/i;
 
-    console.log(`Received message from ${ctx.from.username || ctx.from.first_name}: ${userMessage}`);
+    // التحقق مما إذا كانت الرسالة تطابق نمط رابط انستغرام ريلز
+    if (instagramReelRegex.test(messageText)) {
+        try {
+            // إرسال رسالة للمستخدم لإعلامه بأن التحميل جارٍ
+            await bot.sendMessage(chatId, 'جاري تحميل الريل، يرجى الانتظار...');
 
-    // إرسال رسالة "جاري الكتابة..." لإظهار أن البوت يعالج الطلب
-    ctx.telegram.sendChatAction(ctx.chat.id, 'typing');
+            // استخدام مكتبة instagram-url-dl للحصول على بيانات الريل
+            // قد يستغرق هذا بعض الوقت اعتمادًا على حجم الفيديو وسرعة الشبكة
+            const data = await instagramDl(messageText);
 
-    try {
-        // إنشاء محادثة جديدة مع النموذج
-        const chat = model.startChat({
-            // يمكنك توفير تاريخ محادثة هنا إذا كنت تريد أن يتذكر النموذج السياق السابق
-            // history: [
-            //   {
-            //     role: "user",
-            //     parts: "مرحبا",
-            //   },
-            //   {
-            //     role: "model",
-            //     parts: "أهلاً بك! كيف يمكنني مساعدتك اليوم؟",
-            //   },
-            // ],
-            generationConfig: {
-                maxOutputTokens: 500, // تحديد الحد الأقصى لعدد التوكنات في الاستجابة
-            },
-        });
-
-        // إرسال رسالة المستخدم إلى نموذج Gemini والحصول على الاستجابة
-        const result = await chat.sendMessage(userMessage);
-        const response = await result.response;
-        const text = response.text(); // استخراج النص من استجابة النموذج
-
-        console.log(`Gemini response: ${text}`);
-
-        // إرسال استجابة Gemini إلى المستخدم
-        ctx.reply(text);
-    } catch (error) {
-        console.error('Error interacting with Gemini AI:', error);
-        // إرسال رسالة خطأ إلى المستخدم إذا حدث مشكلة
-        ctx.reply('عذراً، حدث خطأ أثناء معالجة طلبك. يرجى المحاولة مرة أخرى لاحقاً.');
+            // التحقق مما إذا كان هناك رابط فيديو متاح
+            if (data && data.url) {
+                // إرسال الفيديو إلى المستخدم
+                await bot.sendVideo(chatId, data.url, {
+                    caption: 'تم تحميل الريل بنجاح!'
+                });
+                console.log(`تم إرسال الريل إلى ${chatId}`);
+            } else {
+                // إرسال رسالة خطأ إذا لم يتم العثور على رابط الفيديو
+                await bot.sendMessage(chatId, 'عذرًا، لم أتمكن من العثور على رابط الفيديو للريل هذا. قد يكون الرابط غير صالح أو خاص.');
+                console.log(`لم يتم العثور على رابط فيديو للريل: ${messageText}`);
+            }
+        } catch (error) {
+            // التعامل مع الأخطاء التي قد تحدث أثناء عملية التحميل أو الإرسال
+            console.error('حدث خطأ أثناء معالجة الريل:', error);
+            await bot.sendMessage(chatId, 'عذرًا، حدث خطأ أثناء محاولة تحميل الريل. يرجى التأكد من أن الرابط صحيح وحاول مرة أخرى.');
+        }
+    } else {
+        // الرد على الرسائل التي ليست روابط ريلز انستغرام
+        await bot.sendMessage(chatId, 'مرحباً! يرجى إرسال رابط ريلز انستغرام وسأقوم بتحميله لك.');
     }
 });
 
-// معالج أمر /start
-// سيتم تشغيل هذا الكود عندما يرسل المستخدم الأمر /start
-bot.start((ctx) => {
-    ctx.reply('مرحباً بك! أنا بوت يتحدث مع الذكاء الاصطناعي Gemini. أرسل لي أي شيء لنتحدث!');
+// التعامل مع الأخطاء العامة للبوت (مثل مشاكل الاتصال)
+bot.on('polling_error', (error) => {
+    console.error('خطأ في البولينج:', error);
 });
 
-// معالج أمر /help
-// سيتم تشغيل هذا الكود عندما يرسل المستخدم الأمر /help
-bot.help((ctx) => {
-    ctx.reply('يمكنك إرسال أي رسالة نصية وسأقوم بالرد عليك باستخدام الذكاء الاصطناعي. استمتع!');
+// التعامل مع الأخطاء التي تحدث أثناء إرسال الرسائل (اختياري)
+bot.on('webhook_error', (error) => {
+    console.error('خطأ في الويب هوك:', error);
 });
-
-// تشغيل البوت
-bot.launch()
-    .then(() => console.log('Telegram bot started!'))
-    .catch(err => console.error('Failed to start Telegram bot:', err));
-
-// تمكين الإيقاف النظيف في حالة إغلاق التطبيق (مثل Ctrl+C)
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
