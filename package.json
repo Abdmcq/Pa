@@ -1,24 +1,21 @@
 {
-  "name": "instagram-reels-downloader-bot",
+  "name": "hamsa-telegram-bot",
   "version": "1.0.0",
-  "description": "Telegram bot to download Instagram Reels",
-  "main": "index.js",
+  "description": "A simple Telegram bot named Hamsa using Telegraf.js",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js"
   },
   "keywords": [
     "telegram",
     "bot",
-    "instagram",
-    "reels",
-    "downloader",
-    "node.js"
+    "telegraf",
+    "hamsa"
   ],
   "author": "Your Name",
   "license": "ISC",
   "dependencies": {
-    "node-telegram-bot-api": "^0.66.0",
-    "instagram-url-dl": "^1.0.2"
+    "telegraf": "^4.16.1"
   }
 }
 
