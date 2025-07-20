@@ -10,7 +10,7 @@ import ffmpeg from 'fluent-ffmpeg';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const bot = new Telegraf('ضع التوكن الخاص بك هنا');
+const bot = new Telegraf('8016650868:AAGnDW9EaReXm98rcEqccL6HzI7S5M_4-Vc');
 const userSessions = new Map();
 
 // بدء البوت
