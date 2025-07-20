@@ -9,14 +9,17 @@ import ID3Writer from 'node-id3';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ✅ توكن البوت الخاص بك:
 const bot = new Telegraf('7892395794:AAHy-_f_ej0IT0ZLF1jzdXJDMccLiCrMrZA');
 
+// 🧠 لتخزين الجلسة المؤقتة لكل مستخدم
 const userSessions = new Map();
 
 bot.start((ctx) => {
-  ctx.reply('🎧 أرسل لي ملف أغنية (mp3) وسأقوم بتعديل معلوماتها. أرسلها مع اسم الأغنية، الفنان، وصورة الغلاف.');
+  ctx.reply('🎧 أهلاً بك! أرسل لي ملف أغنية (mp3)، وسأقوم بتعديل معلوماتها (الاسم، الفنان، صورة الغلاف).');
 });
 
+// 🟣 عند إرسال ملف mp3
 bot.on('audio', async (ctx) => {
   const userId = ctx.from.id;
   userSessions.set(userId, { audio: ctx.message.audio });
@@ -24,6 +27,7 @@ bot.on('audio', async (ctx) => {
   ctx.reply('📛 أرسل اسم الأغنية:');
 });
 
+// 🟡 التعامل مع الرسائل النصية: اسم الأغنية ثم الفنان
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const session = userSessions.get(userId);
@@ -39,6 +43,7 @@ bot.on('text', async (ctx) => {
   }
 });
 
+// 🟢 عند إرسال صورة الغلاف
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const session = userSessions.get(userId);
@@ -47,37 +52,53 @@ bot.on('photo', async (ctx) => {
     return ctx.reply('❗ أرسل ملف الأغنية وبياناتها أولًا.');
   }
 
-  const photo = ctx.message.photo[ctx.message.photo.length - 1];
-  const fileId = session.audio.file_id;
-  const fileLink = await ctx.telegram.getFileLink(fileId);
-  const photoLink = await ctx.telegram.getFileLink(photo.file_id);
+  try {
+    // تحميل الروابط
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    const audioFileId = session.audio.file_id;
+    const fileLink = await ctx.telegram.getFileLink(audioFileId);
+    const photoLink = await ctx.telegram.getFileLink(photo.file_id);
 
-  const audioBuffer = await (await fetch(fileLink.href)).arrayBuffer();
-  const imageBuffer = await (await fetch(photoLink.href)).arrayBuffer();
+    // تحميل الملفات
+    const audioBuffer = await (await fetch(fileLink.href)).arrayBuffer();
+    const imageBuffer = await (await fetch(photoLink.href)).arrayBuffer();
 
-  const tempFile = path.join(__dirname, `${Date.now()}_song.mp3`);
-  fs.writeFileSync(tempFile, Buffer.from(audioBuffer));
+    // حفظ الملف مؤقتًا
+    const tempFile = path.join(__dirname, `${Date.now()}_song.mp3`);
+    fs.writeFileSync(tempFile, Buffer.from(audioBuffer));
 
-  const tags = {
-    title: session.title,
-    artist: session.artist,
-    image: {
-      mime: 'image/jpeg',
-      type: {
-        id: 3,
-        name: 'front cover'
-      },
-      description: 'Cover',
-      imageBuffer: Buffer.from(imageBuffer)
-    }
-  };
+    // تعديل البيانات
+    const tags = {
+      title: session.title,
+      artist: session.artist,
+      image: {
+        mime: 'image/jpeg',
+        type: {
+          id: 3,
+          name: 'front cover'
+        },
+        description: 'Cover',
+        imageBuffer: Buffer.from(imageBuffer)
+      }
+    };
 
-  ID3Writer.write(tags, tempFile);
+    ID3Writer.write(tags, tempFile);
 
-  await ctx.replyWithAudio({ source: tempFile });
+    // إرسال الملف مع الصورة كـ thumbnail لتظهر في مشغل تيليجرام
+    await ctx.replyWithAudio({
+      source: tempFile,
+      title: session.title,
+      performer: session.artist,
+      thumb: { url: photoLink.href }
+    });
 
-  fs.unlinkSync(tempFile);
-  userSessions.delete(userId);
+    // تنظيف
+    fs.unlinkSync(tempFile);
+    userSessions.delete(userId);
+  } catch (err) {
+    console.error(err);
+    ctx.reply('❌ حدث خطأ أثناء معالجة الملف.');
+  }
 });
 
 bot.launch();
