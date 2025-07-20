@@ -14,12 +14,11 @@ import ffmpeg from 'fluent-ffmpeg';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// **نصيحة هامة:** لا تضع التوكن مباشرة في الكود.
-// استخدم متغيرات البيئة (Environment Variables) لحماية التوكن الخاص بك.
-// ستقوم بتعيين هذا المتغير في لوحة تحكم Render.
-const token = process.env.BOT_TOKEN;
+// تم تضمين التوكن مباشرة في الكود بناءً على طلبك
+const token = "8016650868:AAGnDW9EaReXm98rcEqccL6HzI7S5M_4-Vc";
+
 if (!token) {
-  console.error('خطأ: لم يتم العثور على توكن البوت. الرجاء تعيين متغير البيئة BOT_TOKEN.');
+  console.error('خطأ: توكن البوت غير موجود.');
   process.exit(1); // إيقاف التشغيل إذا لم يتم العثور على التوكن
 }
 
@@ -46,14 +45,23 @@ app.listen(port, () => {
 async function handleAudio(ctx) {
   const userId = ctx.from.id;
   const session = userSessions.get(userId) || {};
-  // احفظ معلومات الملف سواء كان audio أو document
-  session.audio = ctx.message.audio || ctx.message.document;
-  userSessions.set(userId, session);
+  const audio = ctx.message.audio || ctx.message.document;
 
   if (session.mode === 'edit') {
+    session.audio = audio;
+    userSessions.set(userId, session);
     ctx.reply('📛 حسنًا، الآن أرسل اسم الأغنية الجديد:');
   } else if (session.mode === 'trim') {
+    session.audio = audio;
+    userSessions.set(userId, session);
     ctx.reply('⏱️ أرسل وقت البداية الذي تريد القص منه (بالثواني):');
+  } else if (session.mode === 'merge') {
+    if (!session.audioFiles) {
+      session.audioFiles = [];
+    }
+    session.audioFiles.push(audio);
+    userSessions.set(userId, session);
+    ctx.reply(`✅ تمت إضافة المقطع رقم ${session.audioFiles.length}. أرسل المقطع التالي أو اضغط /done للبدء في عملية الدمج.`);
   }
 }
 
@@ -97,6 +105,63 @@ async function trimAudio(ctx, session) {
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
   }
 }
+
+/**
+ * يقوم بدمج عدة مقاطع صوتية في مقطع واحد
+ * @param {import('telegraf').Context} ctx
+ * @param {object} session
+ */
+async function mergeAudio(ctx, session) {
+    const userId = ctx.from.id;
+    await ctx.reply(`⏳ جاري دمج ${session.audioFiles.length} مقاطع، يرجى الانتظار...`);
+
+    const tempDir = path.join(__dirname, `temp_${userId}_${Date.now()}`);
+    fs.mkdirSync(tempDir, { recursive: true });
+    
+    const fileListPath = path.join(tempDir, 'filelist.txt');
+    const outputPath = path.join(__dirname, `${userId}_${Date.now()}_merged.mp3`);
+    const downloadedFiles = [];
+
+    try {
+        // تحميل كل الملفات وكتابة قائمة الملفات لـ ffmpeg
+        for (let i = 0; i < session.audioFiles.length; i++) {
+            const file = session.audioFiles[i];
+            const fileLink = await ctx.telegram.getFileLink(file.file_id);
+            const response = await fetch(fileLink.href);
+            const audioBuffer = await response.arrayBuffer();
+            
+            const tempFilePath = path.join(tempDir, `audio_${i}.mp3`);
+            fs.writeFileSync(tempFilePath, Buffer.from(audioBuffer));
+            downloadedFiles.push(tempFilePath);
+            // الصيغة المطلوبة لملف القائمة في ffmpeg
+            fs.appendFileSync(fileListPath, `file '${path.resolve(tempFilePath)}'\n`);
+        }
+        
+        // تنفيذ أمر الدمج باستخدام ffmpeg
+        await new Promise((resolve, reject) => {
+            ffmpeg()
+                .input(fileListPath)
+                .inputOptions(['-f', 'concat', '-safe', '0'])
+                .outputOptions('-c', 'copy')
+                .output(outputPath)
+                .on('end', resolve)
+                .on('error', (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
+                .run();
+        });
+
+        await ctx.replyWithAudio({ source: outputPath }, { caption: '✅ تم دمج المقاطع بنجاح!' });
+
+    } catch (err) {
+        console.error('Error in mergeAudio:', err);
+        ctx.reply('❌ حدث خطأ فادح أثناء محاولة دمج المقاطع. يرجى التأكد من أن جميع الملفات بنفس الصيغة والمواصفات.');
+    } finally {
+        // تنظيف شامل للجلسة وكل الملفات المؤقتة
+        userSessions.delete(userId);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+}
+
 
 /**
  * خوارزمية تشفير مخصصة
@@ -147,31 +212,41 @@ function customDecrypt(encryptedText) {
 
 // --- منطق البوت ومعالجات الأوامر (مرتبة حسب الأولوية) ---
 
-// 1. أمر البدء
+// 1. أمر البدء والإلغاء
 bot.start((ctx) => {
   userSessions.delete(ctx.from.id); // إعادة تعيين أي جلسة سابقة
   return ctx.reply(
     '🎵 أهلاً بك! اختر القسم الذي تريده من القائمة بالأسفل:',
     Markup.keyboard([
-      ['🎧 تعديل معلومات أغنية'],
-      ['✂️ قص أغنية'],
-      ['🔐 تشفير / فك تشفير نصوص']
+      ['🎧 تعديل معلومات أغنية', '✂️ قص أغنية'],
+      ['🎶 دمج مقاطع صوتية', '🔐 تشفير / فك تشفير']
     ]).resize()
   );
 });
 
+bot.command('cancel', (ctx) => {
+    userSessions.delete(ctx.from.id);
+    ctx.reply('👍 تم إلغاء العملية الحالية. يمكنك البدء من جديد باختيار أحد الخيارات.');
+});
+
+
 // 2. معالجات القائمة الرئيسية
 bot.hears('🎧 تعديل معلومات أغنية', (ctx) => {
   userSessions.set(ctx.from.id, { mode: 'edit' });
-  ctx.reply('📤 ممتاز! الآن أرسل ملف الأغنية الذي تريد تعديله.');
+  ctx.reply('📤 ممتاز! الآن أرسل ملف الأغنية الذي تريد تعديله. لإلغاء العملية أرسل /cancel');
 });
 
 bot.hears('✂️ قص أغنية', (ctx) => {
   userSessions.set(ctx.from.id, { mode: 'trim' });
-  ctx.reply('📤 حسنًا، أرسل ملف الأغنية التي تريد قصها.');
+  ctx.reply('📤 حسنًا، أرسل ملف الأغنية التي تريد قصها. لإلغاء العملية أرسل /cancel');
 });
 
-bot.hears('🔐 تشفير / فك تشفير نصوص', (ctx) => {
+bot.hears('🎶 دمج مقاطع صوتية', (ctx) => {
+    userSessions.set(ctx.from.id, { mode: 'merge', audioFiles: [] });
+    ctx.reply('📤 ممتاز! أرسل المقطع الصوتي الأول.\nعندما تنتهي من إرسال كل المقاطع، اضغط /done للدمج.\nلإلغاء العملية أرسل /cancel');
+});
+
+bot.hears('🔐 تشفير / فك تشفير', (ctx) => {
   userSessions.set(ctx.from.id, { mode: 'crypto' });
   ctx.reply(`🧪 أرسل الأمر بالتنسيق الصحيح:
 
@@ -183,7 +258,21 @@ bot.hears('🔐 تشفير / فك تشفير نصوص', (ctx) => {
 `, { parse_mode: 'Markdown' });
 });
 
-// 3. معالجات الأوامر المحددة (تم وضعها هنا لتعمل بشكل صحيح)
+// 3. معالجات الأوامر المحددة
+bot.command('done', async (ctx) => {
+    const userId = ctx.from.id;
+    const session = userSessions.get(userId);
+
+    if (!session || session.mode !== 'merge') {
+        return ctx.reply('❗ لا يمكنك استخدام هذا الأمر الآن.');
+    }
+    if (!session.audioFiles || session.audioFiles.length < 2) {
+        return ctx.reply('❗ يجب أن ترسل مقطعين صوتيين على الأقل لدمجهما.');
+    }
+    
+    await mergeAudio(ctx, session);
+});
+
 
 bot.hears(/^\/encrypt\s+(\d+)\s+(.+)/s, (ctx) => {
     const complexity = parseInt(ctx.match[1], 10);
@@ -250,7 +339,7 @@ bot.on('document', (ctx) => {
     handleAudio(ctx);
   } else {
     const session = userSessions.get(ctx.from.id);
-    if (session && (session.mode === 'edit' || session.mode === 'trim')) {
+    if (session && (session.mode === 'edit' || session.mode === 'trim' || session.mode === 'merge')) {
         ctx.reply('❗ الملف المرسل ليس ملفًا صوتيًا. يرجى إرسال ملف صوتي.');
     }
   }
@@ -310,7 +399,7 @@ bot.on('text', async (ctx) => {
   const text = ctx.message.text;
 
   if (text.startsWith('/')) return;
-  if (!session || !session.mode || session.mode === 'crypto') return;
+  if (!session || !session.mode || session.mode === 'crypto' || session.mode === 'merge') return;
 
   if (session.mode === 'edit') {
     if (!session.audio) return;
