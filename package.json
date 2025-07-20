@@ -1,21 +1,16 @@
 {
-  "name": "hamsa-telegram-bot",
+  "name": "telegram-audio-metadata-bot",
   "version": "1.0.0",
-  "description": "A simple Telegram bot named Hamsa using Telegraf.js",
-  "main": "bot.js",
+  "main": "index.js",
+  "type": "module",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node index.js"
   },
-  "keywords": [
-    "telegram",
-    "bot",
-    "telegraf",
-    "hamsa"
-  ],
-  "author": "Your Name",
-  "license": "ISC",
   "dependencies": {
-    "telegraf": "^4.16.1"
+    "axios": "^1.6.7",
+    "form-data": "^4.0.0",
+    "node-fetch": "^3.3.2",
+    "node-id3": "^0.2.0",
+    "telegraf": "^4.12.2"
   }
 }
-
