@@ -93,42 +93,47 @@ async function extractTextFromFile(filePath) {
  * يتم إرسال نص المحاضرة إلى Gemini مع تعليمات لإنشاء الأسئلة بنمط محدد.
  * @param {string} lectureText - النص المستخرج من المحاضرة.
  * @returns {Promise<string>} - أسئلة MCQ المنسقة.
+ * @throws {Error} - يرمي خطأ إذا لم يتمكن الذكاء الاصطناعي من إنشاء الأسئلة.
  */
 async function generateMCQs(lectureText) {
     // البرومبت (prompt) الذي سيتم إرساله إلى نموذج Gemini AI
-    // يحدد البرومبت المطلوب من النموذج (5 أسئلة MCQ، 4 خيارات، تنسيق محدد)
-    const prompt = `بناءً على نص المحاضرة التالي، قم بإنشاء 5 أسئلة اختيار من متعدد (MCQs) مع 4 خيارات (A، B، C، D) وقم بتحديد الإجابة الصحيحة. يجب أن يكون التنسيق كالتالي:
+    // تم تحديث البرومبت ليكون باللغة الإنجليزية
+    const prompt = `Based on the following lecture text, generate 5 Multiple Choice Questions (MCQs) with 4 options (A, B, C, D) and specify the correct answer. The format should be as follows:
 
-س1: [نص السؤال]؟
-أ) [الخيار أ]
-ب) [الخيار ب]
-ج) [الخيار ج]
-د) [الخيار د]
-الإجابة الصحيحة: [أ/ب/ج/د]
+Q1: [Question text]?
+A) [Option A]
+B) [Option B]
+C) [Option C]
+D) [Option D]
+Correct Answer: [A/B/C/D]
 
 ---
-نص المحاضرة:
+Lecture Text:
 ${lectureText}
 ---
 `;
 
     try {
-        // استدعاء نموذج Gemini AI لإنشاء المحتوى
         const result = await model.generateContent(prompt);
-        // الحصول على الاستجابة من النموذج
         const response = await result.response;
-        // استخراج النص من الاستجابة
         const text = response.text;
+
+        // التحقق مما إذا كان النص الذي تم إنشاؤه فارغًا أو يحتوي على مسافات بيضاء فقط
+        if (!text || text.trim().length === 0) {
+            throw new Error('The AI could not generate questions from this content. The content might be too short or unclear.');
+        }
+
         return text;
     } catch (error) {
-        console.error('حدث خطأ أثناء إنشاء أسئلة MCQ باستخدام Gemini API:', error);
+        console.error('An error occurred while generating MCQs using Gemini API:', error);
         // التحقق من نوع الخطأ لتقديم رسالة أكثر تحديدًا
         if (error.response && error.response.candidates && error.response.candidates.length === 0) {
-            return 'عذرًا، لم يتمكن الذكاء الاصطناعي من إنشاء أسئلة من هذا المحتوى. قد يكون المحتوى قصيرًا جدًا أو غير واضح.';
-        } else if (error.message.includes('Text not available')) {
-            return 'عذرًا، لم يتمكن الذكاء الاصطناعي من استخراج نص صالح. يرجى التأكد من أن الملف يحتوي على نص واضح.';
+            throw new Error('The AI could not generate questions from this content. The content might be too short or unclear.');
+        } else if (error.message && error.message.includes('Text not available')) {
+            throw new Error('The AI could not extract valid text. Please ensure the file contains clear text.');
         }
-        return 'عذرًا، حدث خطأ غير متوقع أثناء إنشاء الأسئلة. يرجى المحاولة مرة أخرى لاحقًا.';
+        // رمي الخطأ الأصلي إذا كان غير متوقع
+        throw new Error(`Unexpected error from Gemini API: ${error.message || error}`);
     }
 }
 
@@ -167,23 +172,16 @@ bot.on('document', async (msg) => {
         }
 
         // 3. إنشاء أسئلة MCQ باستخدام Gemini API
-        const mcqs = await generateMCQs(lectureText);
-        console.log('تم إنشاء أسئلة MCQ بنجاح.');
+        const mcqs = await generateMCQs(lectureText); // هذه الدالة الآن سترمي خطأ إذا فشلت
 
-        // 4. إرسال أسئلة MCQ مرة أخرى إلى المستخدم
-        // التحقق مما إذا كانت الأسئلة فارغة أو تحتوي على رسالة خطأ من generateMCQs
-        if (!mcqs || mcqs.trim().length === 0 || mcqs.includes('عذرًا، حدث خطأ')) {
-             bot.sendMessage(chatId, mcqs); // أرسل رسالة الخطأ التي تم إنشاؤها في generateMCQs
-        } else {
-            // استخدام `parse_mode: 'Markdown'` لتنسيق النص بشكل أفضل في تليجرام
-            bot.sendMessage(chatId, `إليك أسئلة MCQ بناءً على محاضرتك:\n\n${mcqs}`, { parse_mode: 'Markdown' });
-        }
-
+        // إذا وصلت إلى هنا، فهذا يعني أن mcqs هو نص صالح
+        // استخدام `parse_mode: 'Markdown'` لتنسيق النص بشكل أفضل في تليجرام
+        bot.sendMessage(chatId, `إليك أسئلة MCQ بناءً على محاضرتك:\n\n${mcqs}`, { parse_mode: 'Markdown' });
 
     } catch (error) {
         console.error('حدث خطأ أثناء معالجة المستند:', error);
-        // إرسال رسالة خطأ للمستخدم
-        bot.sendMessage(chatId, `عذرًا، حدث خطأ أثناء معالجة ملفك: ${error.message}. يرجى التأكد من أنه ملف .txt صالح.`);
+        // سيتم التقاط جميع الأخطاء (بما في ذلك الأخطاء التي تم رميها من generateMCQs) هنا
+        bot.sendMessage(chatId, `عذرًا، حدث خطأ أثناء معالجة ملفك: ${error.message}. يرجى التأكد من أنه ملف .txt صالح ومحتواه مناسب.`);
     } finally {
         // تنظيف: حذف الملف المؤقت الذي تم تنزيله
         if (downloadedFilePath && fs.existsSync(downloadedFilePath)) {
