@@ -1,7 +1,7 @@
 {
-  "name": "telegram-whisper-bot",
+  "name": "telegram-whisper-bot-telegraf",
   "version": "1.0.0",
-  "description": "A Telegram whisper bot with inline mode functionality, similar to the Python version.",
+  "description": "A Telegram whisper bot with inline mode functionality, rewritten using Telegraf.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -11,12 +11,13 @@
     "bot",
     "whisper",
     "inline",
-    "node.js"
+    "node.js",
+    "telegraf"
   ],
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "node-telegram-bot-api": "^0.66.0",
+    "telegraf": "^4.16.2",
     "uuid": "^10.0.0"
   }
 }
