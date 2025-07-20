@@ -187,8 +187,8 @@ bot.on('inline_query', async (ctx) => {
             input_message_content: {
                 message_text: `همسة عامة لهذا ${mentionsStr}\n\nاضغط على الزر أدناه لقراءتها.`,
                 parse_mode: 'HTML', // تحديد وضع التنسيق هنا
-                reply_markup: keyboard.reply_markup, // *** تم التصحيح هنا: استخدام keyboard.reply_markup ***
             },
+            reply_markup: keyboard // *** تم التصحيح هنا: reply_markup كخاصية مباشرة لـ result ***
         };
 
         await ctx.answerInlineQuery([result], { cache_time: 1 });
