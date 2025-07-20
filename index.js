@@ -26,18 +26,19 @@ const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
  * توليد استجابة من Google Gemini AI بناءً على استعلام المستخدم.
  * @param {string} userQuery - استعلام المستخدم النصي.
  * @returns {Promise<string>} - الاستجابة النصية من الذكاء الاصطناعي.
- * @throws {Error} - يرمي خطأ إذا لم يتمكن الذكاء الاصطناعي من توليد استجابة.
+ * @throws {Error} - يرمي خطأ إذا لم يتمكن الذكاء الاصطناعي من توليد استجابة صالحة.
  */
 async function generateAIResponse(userQuery) {
     try {
         // استدعاء نموذج Gemini AI لتوليد المحتوى
         const result = await model.generateContent(userQuery);
         const response = await result.response;
-        const text = response.text;
+        const text = response.text; // الحصول على النص من الاستجابة
 
-        // التحقق مما إذا كان النص الذي تم إنشاؤه فارغًا أو يحتوي على مسافات بيضاء فقط
-        if (!text || text.trim().length === 0) {
-            throw new Error('لم يتمكن الذكاء الاصطناعي من توليد إجابة لهذا السؤال. يرجى المحاولة بسؤال آخر.');
+        // *** التحقق الصارم من أن 'text' هو سلسلة نصية صالحة وغير فارغة ***
+        if (typeof text !== 'string' || text.trim().length === 0) {
+            console.error('Gemini API returned non-string or empty text:', text); // سجل القيمة الفعلية
+            throw new Error('الذكاء الاصطناعي لم يتمكن من توليد إجابة صالحة. قد يكون السؤال غير واضح أو المحتوى غير مناسب.');
         }
 
         return text;
