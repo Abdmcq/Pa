@@ -70,7 +70,7 @@ bot.on('text', async (ctx) => {
       ctx.reply('👤 الآن أرسل اسم الفنان:');
     } else if (!session.artist) {
       session.artist = ctx.message.text;
-      ctx.reply('🖼️ أخيرًا، أرسل صورة الغلاف (jpg/png):');
+      ctx.reply('🖼️ هل ترغب في تغيير صورة الغلاف؟ أرسلها الآن، أو أرسل /skip لتخطي.');
     }
   } else if (session.mode === 'trim') {
     if (!session.start) {
@@ -84,6 +84,42 @@ bot.on('text', async (ctx) => {
   }
 
   userSessions.set(userId, session);
+});
+
+bot.command('skip', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = userSessions.get(userId);
+  if (!session || session.mode !== 'edit' || !session.audio || !session.title || !session.artist) {
+    return ctx.reply('❗ لا يوجد ملف قيد المعالجة.');
+  }
+
+  try {
+    const audioFileId = session.audio.file_id;
+    const fileLink = await ctx.telegram.getFileLink(audioFileId);
+    const audioBuffer = await (await fetch(fileLink.href)).arrayBuffer();
+
+    const tempFile = path.join(__dirname, `${Date.now()}_song.mp3`);
+    fs.writeFileSync(tempFile, Buffer.from(audioBuffer));
+
+    const tags = {
+      title: session.title,
+      artist: session.artist
+    };
+
+    ID3Writer.write(tags, tempFile);
+
+    await ctx.replyWithAudio({
+      source: tempFile,
+      title: session.title,
+      performer: session.artist
+    });
+
+    fs.unlinkSync(tempFile);
+    userSessions.delete(userId);
+  } catch (err) {
+    console.error(err);
+    ctx.reply('❌ حدث خطأ أثناء تعديل الملف.');
+  }
 });
 
 bot.on('photo', async (ctx) => {
@@ -165,3 +201,48 @@ async function trimAudio(ctx, session) {
 
 bot.launch();
 console.log('🤖 Bot is running...');
+
+
+// قسم: تغيير اسم المستندات
+bot.hears('📝 تغيير اسم المستند', (ctx) => {
+  userSessions.set(ctx.from.id, { mode: 'rename' });
+  ctx.reply('📎 أرسل المستند (PDF, DOCX, PPTX, ...):');
+});
+
+// قسم: تحويل صيغة الملفات
+bot.hears('🔄 تحويل صيغة الملفات', (ctx) => {
+  userSessions.set(ctx.from.id, { mode: 'convert' });
+  ctx.reply('📎 أرسل الملف الذي تريد تحويله (PDF, DOCX, PPTX، ...):');
+});
+
+// استقبال الملفات العامة للمستندات
+bot.on('document', async (ctx) => {
+  const userId = ctx.from.id;
+  const session = userSessions.get(userId) || {};
+  const document = ctx.message.document;
+
+  if (!['rename', 'convert'].includes(session.mode)) return;
+
+  session.file = document;
+  userSessions.set(userId, session);
+
+  if (session.mode === 'rename') {
+    ctx.reply('✏️ أرسل الاسم الجديد للملف (بدون لاحقة):');
+  } else 
+
+  
+
+  userSessions.set(userId, session);
+});
+
+// تحديث قائمة البداية لتشمل الخيارات الأربعة
+bot.start((ctx) => {
+  userSessions.set(ctx.from.id, {});
+  return ctx.reply(
+    '🎵 اختر القسم الذي تريده:',
+    Markup.keyboard([
+      ['🎧 تعديل معلومات أغنية', '✂️ قص الأغنية'],
+      ['📝 تغيير اسم المستند', '🔄 تحويل صيغة الملفات']
+    ]).resize()
+  );
+});
