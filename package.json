@@ -2,10 +2,10 @@
   "name": "telegram-audio-bot",
   "version": "1.0.0",
   "description": "A Telegram bot to edit, trim, and encrypt.",
-  "main": "bot.js",
+  "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.19.2",
