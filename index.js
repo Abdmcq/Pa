@@ -1,106 +1,286 @@
 // index.js
-// هذا الملف يحتوي على منطق بوت تليجرام الذي يجيب على الأسئلة النصية باستخدام Google Gemini AI.
+// هذا الملف يحتوي على منطق بوت تليجرام "الهمس" باستخدام Node.js.
 
 // استيراد المكتبات الضرورية
 const TelegramBot = require('node-telegram-bot-api'); // مكتبة للتفاعل مع Telegram Bot API
-const { GoogleGenerativeAI } = require('@google/generative-ai'); // مكتبة Google Gemini AI
+const { v4: uuidv4 } = require('uuid'); // مكتبة لإنشاء معرفات فريدة (UUIDs)
+const util = require('util'); // مكتبة Node.js الأصلية للمرافق (تستخدم هنا لـ inspect)
 
-// --- إعدادات البوت ومفتاح API (مضمنة مباشرة لغرض التجربة فقط) ---
-// تحذير: هذا غير آمن لبيئات الإنتاج! استخدم متغيرات البيئة بدلاً من ذلك.
-const BOT_TOKEN = '7892395794:AAHy-_f_ej0IT0ZLF1jzdXJDMccLiCrMrZA'; // توكن بوت تليجرام الخاص بك
-const GEMINI_API_KEY = 'AIzaSyCtGuhftV0VQCWZpYS3KTMWHoLg__qpO3g'; // مفتاح Google Gemini API الخاص بك
+// --- إعدادات البوت الأساسية ---
+// توكن البوت الخاص بك. (مضمن مباشرة لغرض التجربة فقط - استخدم متغيرات البيئة في الإنتاج)
+const BOT_TOKEN = '7487838353:AAFmFXZ0PzjeFCz3x6rorCMlN_oBBzDyzEQ';
+
+// معرف المالك (Telegram User ID). هذا مهم للتحكم في من يمكنه استخدام وظيفة الهمس.
+// استبدل هذا بمعرف تليجرام الخاص بك.
+const OWNER_ID = 1749717270; // مثال: 123456789 (استبدل بهذا)
 
 // تهيئة بوت تليجرام
 // `polling: true` تعني أن البوت سيبدأ في الاستماع للرسائل الجديدة بشكل مستمر
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
-console.log('Telegram AI Chat bot started...'); // رسالة تأكيد عند بدء تشغيل البوت
+console.log('Telegram Whisper Bot started...'); // رسالة تأكيد عند بدء تشغيل البوت
 
-// تهيئة Google Generative AI
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-// اختيار النموذج الذي سيتم استخدامه. 'gemini-2.5-flash' هو نموذج سريع وفعال.
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+// --- تخزين الرسائل (في الذاكرة) ---
+// لتسهيل التشغيل، سنستخدم قاموس في الذاكرة بدلاً من قاعدة بيانات.
+// ملاحظة: ستفقد الرسائل عند إعادة تشغيل البوت.
+const messageStore = {};
 
-// --- دالة مساعدة ---
+// --- دوال مساعدة ---
 
 /**
- * توليد استجابة من Google Gemini AI بناءً على استعلام المستخدم.
- * @param {string} userQuery - استعلام المستخدم النصي.
- * @returns {Promise<string>} - الاستجابة النصية من الذكاء الاصطناعي.
- * @throws {Error} - يرمي خطأ إذا لم يتمكن الذكاء الاصطناعي من توليد استجابة صالحة.
+ * دالة مشتركة لعرض رسالة الترحيب والمساعدة.
+ * @param {object} message - كائن الرسالة من تليجرام.
  */
-async function generateAIResponse(userQuery) {
-    try {
-        // استدعاء نموذج Gemini AI لتوليد المحتوى
-        const result = await model.generateContent(userQuery);
-        const response = await result.response;
-        const text = response.text; // الحصول على النص من الاستجابة
-
-        // *** التحقق الصارم من أن 'text' هو سلسلة نصية صالحة وغير فارغة ***
-        if (typeof text !== 'string' || text.trim().length === 0) {
-            console.error('Gemini API returned non-string or empty text:', text); // سجل القيمة الفعلية
-            throw new Error('الذكاء الاصطناعي لم يتمكن من توليد إجابة صالحة. قد يكون السؤال غير واضح أو المحتوى غير مناسب.');
-        }
-
-        return text;
-    } catch (error) {
-        console.error('حدث خطأ أثناء توليد استجابة من Gemini AI:', error);
-        // التحقق من نوع الخطأ لتقديم رسالة أكثر تحديدًا
-        if (error.response && error.response.candidates && error.response.candidates.length === 0) {
-            throw new Error('لم يتمكن الذكاء الاصطناعي من توليد إجابة لهذا السؤال. قد يكون السؤال غير واضح أو ينتهك سياسات المحتوى.');
-        } else if (error.message && error.message.includes('Text not available')) {
-            throw new Error('لم يتمكن الذكاء الاصطناعي من استخراج نص صالح. يرجى التأكد من أن سؤالك واضح.');
-        }
-        // رمي الخطأ الأصلي إذا كان غير متوقع
-        throw new Error(`خطأ غير متوقع من الذكاء الاصطناعي: ${error.message || error}`);
-    }
+async function sendWelcomeMessage(message) {
+    await bot.sendMessage(
+        message.chat.id,
+        "أهلاً بك في بوت الهمس!\n\n" +
+        "لإرسال رسالة سرية في مجموعة، اذكرني في شريط الرسائل بالصيغة التالية:\n" +
+        "`@اسم_البوت username1,username2 || الرسالة السرية || الرسالة العامة`\n\n" +
+        "- استبدل `username1,username2` بأسماء المستخدمين أو معرفاتهم (IDs) مفصولة بفواصل.\n" +
+        "- `الرسالة السرية` هي النص الذي سيظهر فقط للمستخدمين المحددين.\n" +
+        "- `الرسالة العامة` هي النص الذي سيظهر لبقية أعضاء المجموعة عند محاولة قراءة الرسالة.\n" +
+        "- يجب أن يكون طول الرسالة السرية أقل من 200 حرف، والطول الإجمالي أقل من 255 حرفًا.\n" +
+        "\nملاحظة: لا تحتاج لإضافة البوت إلى المجموعة لاستخدامه.",
+        { parse_mode: 'Markdown' } // تحديد وضع التنسيق
+    );
 }
 
-// --- معالجات أحداث بوت تليجرام ---
+/**
+ * دالة للتحقق مما إذا كان المستخدم هو المالك.
+ * @param {number} userId - معرف المستخدم.
+ * @returns {boolean} - صحيح إذا كان المستخدم هو المالك.
+ */
+function isOwner(userId) {
+    return userId === OWNER_ID;
+}
 
-// معالجة الأمر /start
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id; // معرف الدردشة
-    bot.sendMessage(chatId, 'مرحبًا! أنا بوت تصفح ذكي. أرسل لي أي سؤال نصي وسأحاول الإجابة عليه باستخدام الذكاء الاصطناعي.');
+// --- معالج الأوامر ---
+
+// معالج لأمر /start
+bot.onText(/\/start/, async (msg) => {
+    if (!isOwner(msg.from.id)) {
+        console.log(`Ignoring /start from non-owner: ${msg.from.id}`);
+        return; // تجاهل بصمت
+    }
+    await sendWelcomeMessage(msg);
 });
 
-// معالجة جميع الرسائل النصية الواردة
-bot.on('text', async (msg) => {
-    const chatId = msg.chat.id; // معرف الدردشة
-    const userQuery = msg.text; // نص رسالة المستخدم
+// معالج لأمر /help
+bot.onText(/\/help/, async (msg) => {
+    if (!isOwner(msg.from.id)) {
+        console.log(`Ignoring /help from non-owner: ${msg.from.id}`);
+        return; // تجاهل بصمت
+    }
+    await sendWelcomeMessage(msg);
+});
 
-    // تجاهل الأمر /start هنا لأنه يتم معالجته بواسطة bot.onText
-    if (userQuery.startsWith('/start')) {
+// --- معالج الاستعلامات المضمنة (Inline Mode) ---
+bot.on('inline_query', async (inlineQuery) => {
+    const queryText = inlineQuery.query.trim();
+    const senderId = inlineQuery.from.id;
+    const senderUsername = inlineQuery.from.username ? inlineQuery.from.username.toLowerCase() : null;
+
+    console.log(`Received inline query from ${senderId} (@${senderUsername || 'N/A'}): "${queryText}"`);
+
+    if (!isOwner(senderId)) {
+        console.log(`Ignoring inline query from non-owner: ${senderId}`);
+        const unauthorizedResult = {
+            type: 'article',
+            id: uuidv4(),
+            title: 'غير مصرح لك',
+            description: 'هذا البوت مخصص للمالك فقط.',
+            input_message_content: {
+                message_text: 'عذراً، لا يمكنك استخدام هذا البوت.',
+            },
+        };
+        try {
+            await bot.answerInlineQuery(inlineQuery.id, [unauthorizedResult], { cache_time: 60 });
+        } catch (e) {
+            console.error(`Error sending unauthorized message to non-owner ${senderId}:`, e);
+        }
         return;
     }
 
-    // إرسال "جاري الكتابة..." لتحسين تجربة المستخدم
-    await bot.sendChatAction(chatId, 'typing');
-
     try {
-        // توليد استجابة من الذكاء الاصطناعي
-        const aiResponse = await generateAIResponse(userQuery);
+        const parts = queryText.split('||');
+        if (parts.length !== 3) {
+            const errorResult = {
+                type: 'article',
+                id: uuidv4(),
+                title: 'خطأ في التنسيق',
+                description: 'يرجى استخدام: مستخدمين || رسالة سرية || رسالة عامة',
+                input_message_content: {
+                    message_text: 'تنسيق خاطئ. يرجى مراجعة /help',
+                },
+            };
+            await bot.answerInlineQuery(inlineQuery.id, [errorResult], { cache_time: 1 });
+            return;
+        }
 
-        // إرسال الاستجابة إلى المستخدم
-        bot.sendMessage(chatId, aiResponse);
+        const targetUsersStr = parts[0].trim();
+        const secretMessage = parts[1].trim();
+        const publicMessage = parts[2].trim();
 
-    } catch (error) {
-        console.error('حدث خطأ أثناء معالجة رسالة المستخدم:', error);
-        // إرسال رسالة خطأ للمستخدم
-        bot.sendMessage(chatId, `عذرًا، حدث خطأ أثناء معالجة سؤالك: ${error.message}. يرجى المحاولة مرة أخرى لاحقًا.`);
+        // التحقق من طول الرسائل
+        if (secretMessage.length >= 200 || queryText.length >= 255) {
+            const lengthErrorResult = {
+                type: 'article',
+                id: uuidv4(),
+                title: 'خطأ: الرسالة طويلة جدًا',
+                description: `السرية: ${secretMessage.length}/199, الإجمالي: ${queryText.length}/254`,
+                input_message_content: {
+                    message_text: 'الرسالة طويلة جدًا. يرجى مراجعة /help',
+                },
+            };
+            await bot.answerInlineQuery(inlineQuery.id, [lengthErrorResult], { cache_time: 1 });
+            return;
+        }
+
+        // تنظيف قائمة المستخدمين المستهدفين
+        const targetUsers = targetUsersStr.split(',').map(user => user.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+        if (targetUsers.length === 0) {
+            const noUserErrorResult = {
+                type: 'article',
+                id: uuidv4(),
+                title: 'خطأ: لم يتم تحديد مستخدمين',
+                description: 'يجب تحديد مستخدم واحد على الأقل.',
+                input_message_content: {
+                    message_text: 'لم يتم تحديد مستخدمين. يرجى مراجعة /help',
+                },
+            };
+            await bot.answerInlineQuery(inlineQuery.id, [noUserErrorResult], { cache_time: 1 });
+            return;
+        }
+
+        // إنشاء Mentions (تنسيق HTML)
+        const targetMentions = targetUsers.map(user => {
+            // إذا كان يبدو كمعرف رقمي
+            if (!isNaN(parseInt(user)) && String(parseInt(user)) === user) {
+                return `<a href="tg://user?id=${user}">المستخدم ${user}</a>`;
+            } else {
+                // افتراض أنه اسم مستخدم
+                return `@${user}`;
+            }
+        });
+        const mentionsStr = targetMentions.join(', ');
+
+        // إنشاء معرف فريد للرسالة وتخزينها
+        const msgId = uuidv4();
+        messageStore[msgId] = {
+            senderId: String(senderId), // تحويل إلى String للمقارنة المتسقة
+            senderUsername: senderUsername,
+            targetUsers: targetUsers, // قائمة بأسماء المستخدمين والمعرفات (صغيرة)
+            secretMessage: secretMessage,
+            publicMessage: publicMessage,
+        };
+        console.log(`Stored message ${msgId}: ${util.inspect(messageStore[msgId], { depth: null })}`);
+
+        // إنشاء الزر المضمن
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: 'اظهار الهمسة العامة', callback_data: `whisper_${msgId}` }]
+            ]
+        };
+
+        // إنشاء نتيجة الاستعلام المضمن
+        const result = {
+            type: 'article',
+            id: msgId,
+            title: 'رسالة همس جاهزة للإرسال',
+            description: `موجهة إلى: ${targetUsers.join(', ')}`,
+            input_message_content: {
+                message_text: `همسة عامة لهذا ${mentionsStr}\n\nاضغط على الزر أدناه لقراءتها.`,
+                parse_mode: 'HTML', // تحديد وضع التنسيق هنا
+            },
+            reply_markup: keyboard,
+        };
+
+        await bot.answerInlineQuery(inlineQuery.id, [result], { cache_time: 1 });
+
+    } catch (e) {
+        console.error('Error in inline handler:', e);
+        const genericErrorResult = {
+            type: 'article',
+            id: uuidv4(),
+            title: 'حدث خطأ',
+            description: 'حدث خطأ أثناء معالجة طلبك. يرجى المحاولة مرة أخرى.',
+            input_message_content: {
+                message_text: 'عذراً، حدث خطأ ما أثناء معالجة طلبك.',
+            },
+        };
+        await bot.answerInlineQuery(inlineQuery.id, [genericErrorResult], { cache_time: 1 });
     }
 });
 
-// معالجة أي رسائل غير نصية (مثل الصور، الملفات، إلخ)
-bot.on('message', (msg) => {
-    const chatId = msg.chat.id;
-    // إذا لم تكن الرسالة نصية (مثل ملف أو صورة)، أرسل رسالة توضيحية
-    if (!msg.text) {
-        bot.sendMessage(chatId, 'عذرًا، أنا أفهم الأسئلة النصية فقط. يرجى إرسال سؤالك كنص.');
+// --- معالج ردود الأزرار المضمنة (Callback Query) ---
+bot.on('callback_query', async (call) => {
+    try {
+        const callbackData = call.data;
+        // التحقق مما إذا كانت بيانات الـ callback تبدأ بـ 'whisper_'
+        if (!callbackData.startsWith('whisper_')) {
+            await bot.answerCallbackQuery(call.id, { text: 'بيانات غير صالحة.', show_alert: true });
+            return;
+        }
+
+        const msgId = callbackData.substring('whisper_'.length);
+        const clickerId = String(call.from.id); // تحويل إلى String للمقارنة المتسقة
+        const clickerUsername = call.from.username ? call.from.username.toLowerCase() : null;
+
+        console.log(`Callback received for msg_id: ${msgId} from user: ${clickerId} (@${clickerUsername || 'N/A'})`);
+
+        const messageData = messageStore[msgId];
+
+        if (!messageData) {
+            await bot.answerCallbackQuery(call.id, { text: 'عذراً، هذه الرسالة لم تعد متوفرة أو انتهت صلاحيتها.', show_alert: true });
+            console.warn(`Message ID ${msgId} not found in store.`);
+            return;
+        }
+
+        // التحقق من صلاحية المستخدم
+        let isAuthorized = false;
+        if (clickerId === messageData.senderId) {
+            isAuthorized = true;
+        } else {
+            for (const target of messageData.targetUsers) {
+                if (target === clickerId || (clickerUsername && target === clickerUsername)) {
+                    isAuthorized = true;
+                    break;
+                }
+            }
+        }
+
+        console.log(`User ${clickerId} authorization status for msg ${msgId}: ${isAuthorized}`);
+
+        // عرض الرسالة المناسبة
+        if (isAuthorized) {
+            let messageToShow = messageData.secretMessage;
+            messageToShow += `\n\n(ملاحظة بقية الطلاب يشوفون هاي الرسالة مايشوفون الرسالة الفوگ: '${messageData.publicMessage}')`;
+            // في Node.js، لا يوجد حد أقصى لـ alert text مثل aiogram، لكن يمكننا قصها إذا أردت
+            // if (messageToShow.length > 200) {
+            //      messageToShow = messageData.secretMessage.substring(0, 150) + "... (الرسالة أطول من اللازم للعرض الكامل هنا)";
+            // }
+            await bot.answerCallbackQuery(call.id, { text: messageToShow, show_alert: true });
+            console.log(`Showing secret message for ${msgId} to user ${clickerId}`);
+        } else {
+            await bot.answerCallbackQuery(call.id, { text: messageData.publicMessage, show_alert: true });
+            console.log(`Showing public message for ${msgId} to user ${clickerId}`);
+        }
+
+    } catch (e) {
+        console.error('Error in callback handler:', e);
+        await bot.answerCallbackQuery(call.id, { text: 'حدث خطأ ما أثناء معالجة طلبك.', show_alert: true });
     }
 });
 
 // معالجة أخطاء الاستقصاء (polling errors)
 bot.on('polling_error', (error) => {
-    console.error('خطأ في الاستقصاء:', error);
+    console.error('Polling error:', error);
+});
+
+// معالجة أي رسائل أخرى غير الأوامر أو الاستعلامات المضمنة
+bot.on('message', (msg) => {
+    // هذا المعالج سيتلقى الرسائل العادية التي ليست أوامر أو استعلامات مضمنة
+    // لا نحتاج للتعامل معها بشكل خاص في هذا البوت لأنه يعتمد على الوضع المضمن بشكل أساسي
+    // يمكن إضافة رسالة "لا أفهم" هنا إذا أردت
 });
 
