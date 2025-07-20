@@ -17,7 +17,7 @@
   "author": "Your Name",
   "license": "ISC",
   "dependencies": {
-    "node-telegram-bot-api": "^0.61.0",
+    "node-telegram-bot-api": "^0.66.0",
     "instagram-url-dl": "^1.0.2"
   }
 }
