@@ -1,23 +1,22 @@
 // index.js
-// هذا الملف يحتوي على منطق بوت تليجرام "الهمس" باستخدام Node.js.
+// هذا الملف يحتوي على منطق بوت تليجرام "الهمس" باستخدام مكتبة Telegraf.
 
 // استيراد المكتبات الضرورية
-const TelegramBot = require('node-telegram-bot-api'); // مكتبة للتفاعل مع Telegram Bot API
+const { Telegraf, Markup } = require('telegraf'); // مكتبة Telegraf
 const { v4: uuidv4 } = require('uuid'); // مكتبة لإنشاء معرفات فريدة (UUIDs)
 const util = require('util'); // مكتبة Node.js الأصلية للمرافق (تستخدم هنا لـ inspect)
 
 // --- إعدادات البوت الأساسية ---
 // توكن البوت الخاص بك. (مضمن مباشرة لغرض التجربة فقط - استخدم متغيرات البيئة في الإنتاج)
-const BOT_TOKEN = '7487838353:AAFmFXZ0PzjeFCz3x6rorCMlN_oBBzDyzEQ';
+const BOT_TOKEN = '7892395794:AAHy-_f_ej0IT0ZLF1jzdXJDMccLiCrMrZA';
 
 // معرف المالك (Telegram User ID). هذا مهم للتحكم في من يمكنه استخدام وظيفة الهمس.
 // استبدل هذا بمعرف تليجرام الخاص بك.
 const OWNER_ID = 1749717270; // مثال: 123456789 (استبدل بهذا)
 
-// تهيئة بوت تليجرام
-// `polling: true` تعني أن البوت سيبدأ في الاستماع للرسائل الجديدة بشكل مستمر
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
-console.log('Telegram Whisper Bot started...'); // رسالة تأكيد عند بدء تشغيل البوت
+// تهيئة بوت Telegraf
+const bot = new Telegraf(BOT_TOKEN);
+console.log('Telegram Whisper Bot (Telegraf) started...'); // رسالة تأكيد عند بدء تشغيل البوت
 
 // --- تخزين الرسائل (في الذاكرة) ---
 // لتسهيل التشغيل، سنستخدم قاموس في الذاكرة بدلاً من قاعدة بيانات.
@@ -28,11 +27,10 @@ const messageStore = {};
 
 /**
  * دالة مشتركة لعرض رسالة الترحيب والمساعدة.
- * @param {object} message - كائن الرسالة من تليجرام.
+ * @param {object} ctx - كائن السياق (Context) من Telegraf.
  */
-async function sendWelcomeMessage(message) {
-    await bot.sendMessage(
-        message.chat.id,
+async function sendWelcomeMessage(ctx) {
+    await ctx.replyWithMarkdown(
         "أهلاً بك في بوت الهمس!\n\n" +
         "لإرسال رسالة سرية في مجموعة، اذكرني في شريط الرسائل بالصيغة التالية:\n" +
         "`@اسم_البوت username1,username2 || الرسالة السرية || الرسالة العامة`\n\n" +
@@ -40,8 +38,7 @@ async function sendWelcomeMessage(message) {
         "- `الرسالة السرية` هي النص الذي سيظهر فقط للمستخدمين المحددين.\n" +
         "- `الرسالة العامة` هي النص الذي سيظهر لبقية أعضاء المجموعة عند محاولة قراءة الرسالة.\n" +
         "- يجب أن يكون طول الرسالة السرية أقل من 200 حرف، والطول الإجمالي أقل من 255 حرفًا.\n" +
-        "\nملاحظة: لا تحتاج لإضافة البوت إلى المجموعة لاستخدامه.",
-        { parse_mode: 'Markdown' } // تحديد وضع التنسيق
+        "\nملاحظة: لا تحتاج لإضافة البوت إلى المجموعة لاستخدامه."
     );
 }
 
@@ -57,25 +54,26 @@ function isOwner(userId) {
 // --- معالج الأوامر ---
 
 // معالج لأمر /start
-bot.onText(/\/start/, async (msg) => {
-    if (!isOwner(msg.from.id)) {
-        console.log(`Ignoring /start from non-owner: ${msg.from.id}`);
+bot.start(async (ctx) => {
+    if (!isOwner(ctx.from.id)) {
+        console.log(`Ignoring /start from non-owner: ${ctx.from.id}`);
         return; // تجاهل بصمت
     }
-    await sendWelcomeMessage(msg);
+    await sendWelcomeMessage(ctx);
 });
 
 // معالج لأمر /help
-bot.onText(/\/help/, async (msg) => {
-    if (!isOwner(msg.from.id)) {
-        console.log(`Ignoring /help from non-owner: ${msg.from.id}`);
+bot.help(async (ctx) => {
+    if (!isOwner(ctx.from.id)) {
+        console.log(`Ignoring /help from non-owner: ${ctx.from.id}`);
         return; // تجاهل بصمت
     }
-    await sendWelcomeMessage(msg);
+    await sendWelcomeMessage(ctx);
 });
 
 // --- معالج الاستعلامات المضمنة (Inline Mode) ---
-bot.on('inline_query', async (inlineQuery) => {
+bot.on('inline_query', async (ctx) => {
+    const inlineQuery = ctx.inlineQuery;
     const queryText = inlineQuery.query.trim();
     const senderId = inlineQuery.from.id;
     const senderUsername = inlineQuery.from.username ? inlineQuery.from.username.toLowerCase() : null;
@@ -94,7 +92,7 @@ bot.on('inline_query', async (inlineQuery) => {
             },
         };
         try {
-            await bot.answerInlineQuery(inlineQuery.id, [unauthorizedResult], { cache_time: 60 });
+            await ctx.answerInlineQuery([unauthorizedResult], { cache_time: 60 });
         } catch (e) {
             console.error(`Error sending unauthorized message to non-owner ${senderId}:`, e);
         }
@@ -113,7 +111,7 @@ bot.on('inline_query', async (inlineQuery) => {
                     message_text: 'تنسيق خاطئ. يرجى مراجعة /help',
                 },
             };
-            await bot.answerInlineQuery(inlineQuery.id, [errorResult], { cache_time: 1 });
+            await ctx.answerInlineQuery([errorResult], { cache_time: 1 });
             return;
         }
 
@@ -132,7 +130,7 @@ bot.on('inline_query', async (inlineQuery) => {
                     message_text: 'الرسالة طويلة جدًا. يرجى مراجعة /help',
                 },
             };
-            await bot.answerInlineQuery(inlineQuery.id, [lengthErrorResult], { cache_time: 1 });
+            await ctx.answerInlineQuery([lengthErrorResult], { cache_time: 1 });
             return;
         }
 
@@ -148,7 +146,7 @@ bot.on('inline_query', async (inlineQuery) => {
                     message_text: 'لم يتم تحديد مستخدمين. يرجى مراجعة /help',
                 },
             };
-            await bot.answerInlineQuery(inlineQuery.id, [noUserErrorResult], { cache_time: 1 });
+            await ctx.answerInlineQuery([noUserErrorResult], { cache_time: 1 });
             return;
         }
 
@@ -175,12 +173,10 @@ bot.on('inline_query', async (inlineQuery) => {
         };
         console.log(`Stored message ${msgId}: ${util.inspect(messageStore[msgId], { depth: null })}`);
 
-        // إنشاء الزر المضمن
-        const keyboard = {
-            inline_keyboard: [
-                [{ text: 'اظهار الهمسة العامة', callback_data: `whisper_${msgId}` }]
-            ]
-        };
+        // إنشاء الزر المضمن باستخدام Markup
+        const keyboard = Markup.inlineKeyboard([
+            Markup.button.callback('اظهار الهمسة العامة', `whisper_${msgId}`)
+        ]);
 
         // إنشاء نتيجة الاستعلام المضمن
         const result = {
@@ -195,7 +191,7 @@ bot.on('inline_query', async (inlineQuery) => {
             reply_markup: keyboard,
         };
 
-        await bot.answerInlineQuery(inlineQuery.id, [result], { cache_time: 1 });
+        await ctx.answerInlineQuery([result], { cache_time: 1 });
 
     } catch (e) {
         console.error('Error in inline handler:', e);
@@ -208,30 +204,25 @@ bot.on('inline_query', async (inlineQuery) => {
                 message_text: 'عذراً، حدث خطأ ما أثناء معالجة طلبك.',
             },
         };
-        await bot.answerInlineQuery(inlineQuery.id, [genericErrorResult], { cache_time: 1 });
+        await ctx.answerInlineQuery([genericErrorResult], { cache_time: 1 });
     }
 });
 
 // --- معالج ردود الأزرار المضمنة (Callback Query) ---
-bot.on('callback_query', async (call) => {
+// استخدام bot.action للتعامل مع callback_data التي تبدأ بـ 'whisper_'
+bot.action(/^whisper_/, async (ctx) => {
     try {
-        const callbackData = call.data;
-        // التحقق مما إذا كانت بيانات الـ callback تبدأ بـ 'whisper_'
-        if (!callbackData.startsWith('whisper_')) {
-            await bot.answerCallbackQuery(call.id, { text: 'بيانات غير صالحة.', show_alert: true });
-            return;
-        }
-
+        const callbackData = ctx.callbackQuery.data;
         const msgId = callbackData.substring('whisper_'.length);
-        const clickerId = String(call.from.id); // تحويل إلى String للمقارنة المتسقة
-        const clickerUsername = call.from.username ? call.from.username.toLowerCase() : null;
+        const clickerId = String(ctx.from.id); // تحويل إلى String للمقارنة المتسقة
+        const clickerUsername = ctx.from.username ? ctx.from.username.toLowerCase() : null;
 
         console.log(`Callback received for msg_id: ${msgId} from user: ${clickerId} (@${clickerUsername || 'N/A'})`);
 
         const messageData = messageStore[msgId];
 
         if (!messageData) {
-            await bot.answerCallbackQuery(call.id, { text: 'عذراً، هذه الرسالة لم تعد متوفرة أو انتهت صلاحيتها.', show_alert: true });
+            await ctx.answerCbQuery('عذراً، هذه الرسالة لم تعد متوفرة أو انتهت صلاحيتها.', { show_alert: true });
             console.warn(`Message ID ${msgId} not found in store.`);
             return;
         }
@@ -255,32 +246,30 @@ bot.on('callback_query', async (call) => {
         if (isAuthorized) {
             let messageToShow = messageData.secretMessage;
             messageToShow += `\n\n(ملاحظة بقية الطلاب يشوفون هاي الرسالة مايشوفون الرسالة الفوگ: '${messageData.publicMessage}')`;
-            // في Node.js، لا يوجد حد أقصى لـ alert text مثل aiogram، لكن يمكننا قصها إذا أردت
-            // if (messageToShow.length > 200) {
-            //      messageToShow = messageData.secretMessage.substring(0, 150) + "... (الرسالة أطول من اللازم للعرض الكامل هنا)";
-            // }
-            await bot.answerCallbackQuery(call.id, { text: messageToShow, show_alert: true });
+            await ctx.answerCbQuery(messageToShow, { show_alert: true });
             console.log(`Showing secret message for ${msgId} to user ${clickerId}`);
         } else {
-            await bot.answerCallbackQuery(call.id, { text: messageData.publicMessage, show_alert: true });
+            await ctx.answerCbQuery(messageData.publicMessage, { show_alert: true });
             console.log(`Showing public message for ${msgId} to user ${clickerId}`);
         }
 
     } catch (e) {
         console.error('Error in callback handler:', e);
-        await bot.answerCallbackQuery(call.id, { text: 'حدث خطأ ما أثناء معالجة طلبك.', show_alert: true });
+        await ctx.answerCbQuery('حدث خطأ ما أثناء معالجة طلبك.', { show_alert: true });
     }
 });
 
-// معالجة أخطاء الاستقصاء (polling errors)
-bot.on('polling_error', (error) => {
-    console.error('Polling error:', error);
+// معالجة أخطاء البوت العامة
+bot.catch((err, ctx) => {
+    console.error(`Ooops, encountered an error for ${ctx.updateType}`, err);
+    // يمكنك إرسال رسالة خطأ عامة للمستخدم هنا إذا أردت
+    // ctx.reply('عذراً، حدث خطأ ما. يرجى المحاولة مرة أخرى لاحقاً.');
 });
 
-// معالجة أي رسائل أخرى غير الأوامر أو الاستعلامات المضمنة
-bot.on('message', (msg) => {
-    // هذا المعالج سيتلقى الرسائل العادية التي ليست أوامر أو استعلامات مضمنة
-    // لا نحتاج للتعامل معها بشكل خاص في هذا البوت لأنه يعتمد على الوضع المضمن بشكل أساسي
-    // يمكن إضافة رسالة "لا أفهم" هنا إذا أردت
-});
+// بدء تشغيل البوت
+bot.launch();
+
+// تمكين الإيقاف النظيف في حالات إيقاف التطبيق (مثل Ctrl+C)
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
