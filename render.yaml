@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: telegram-media-bot
+    env: node
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "node index.js"
+    buildpacks:
+      - url: https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest
+
