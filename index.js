@@ -7,39 +7,73 @@ import { fileURLToPath } from 'url';
 import fetch from 'node-fetch';
 import NodeID3 from 'node-id3';
 import ffmpeg from 'fluent-ffmpeg';
+import YtDlpWrap_ from 'yt-dlp-wrap';
 
 // --- الإعدادات الأولية ---
 
-// الحصول على مسار المجلد الحالي (مهم لوحدات ES)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// تم تضمين التوكن مباشرة في الكود بناءً على طلبك
+const YtDlpWrap = YtDlpWrap_.default || YtDlpWrap_;
+const ytDlpWrap = new YtDlpWrap();
+
+// *** تم إرجاع التوكن إلى الكود مباشرة بناءً على طلبك ***
 const token = "8016650868:AAGnDW9EaReXm98rcEqccL6HzI7S5M_4-Vc";
 
 if (!token) {
   console.error('خطأ: توكن البوت غير موجود.');
-  process.exit(1); // إيقاف التشغيل إذا لم يتم العثور على التوكن
+  process.exit(1);
 }
 
 const bot = new Telegraf(token);
-const userSessions = new Map(); // لتخزين حالة كل مستخدم مؤقتًا
+const userSessions = new Map();
 
-// --- إعداد خادم الويب (للتشغيل على Render) ---
-
+// --- إعداد خادم الويب ---
 const app = express();
 const port = process.env.PORT || 3000;
-// هذا الجزء يبقي البوت نشطًا على منصات مثل Render
 app.get('/', (req, res) => res.send('🤖 Bot is alive and running!'));
-app.listen(port, () => {
-  console.log(`🚀 Web server has started on port ${port}`);
-});
 
 
 // --- الدوال المساعدة ---
 
 /**
- * يعالج ملفات الصوت المستلمة من المستخدم
+ * دالة تحميل الفيديو من رابط
+ * @param {import('telegraf').Context} ctx
+ * @param {string} url
+ */
+async function handleDownload(ctx, url) {
+    const userId = ctx.from.id;
+    const processingMessage = await ctx.reply('⏳ جاري تحميل الفيديو، قد يستغرق الأمر بعض الوقت...');
+    const outputPath = path.join(__dirname, `${userId}_${Date.now()}_download.mp4`);
+
+    try {
+        await ytDlpWrap.execPromise([
+            url,
+            '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            '-o', outputPath
+        ]);
+
+        if (fs.existsSync(outputPath)) {
+            await ctx.replyWithVideo({ source: outputPath }, { caption: '✅ تم تحميل الفيديو بنجاح!' });
+        } else {
+            throw new Error('لم يتم العثور على الملف الناتج بعد التحميل.');
+        }
+
+    } catch (err) {
+        console.error('Error in handleDownload:', err);
+        ctx.reply('❌ حدث خطأ أثناء محاولة تحميل الفيديو. تأكد من أن الرابط صحيح وعام.');
+    } finally {
+        userSessions.delete(userId);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        ctx.telegram.deleteMessage(ctx.chat.id, processingMessage.message_id).catch(() => {});
+    }
+}
+
+// ... (بقية الدوال والكود كما هي)
+
+
+/**
+ * يعالج ملفات الصوت المستلمة
  * @param {import('telegraf').Context} ctx
  */
 async function handleAudio(ctx) {
@@ -54,25 +88,25 @@ async function handleAudio(ctx) {
   } else if (session.mode === 'trim') {
     session.audio = audio;
     userSessions.set(userId, session);
-    ctx.reply('⏱️ أرسل وقت البداية الذي تريد القص منه (بالثواني):');
+    ctx.reply('⏱️ أرسل وقت البداية للقص (بالثواني):');
   } else if (session.mode === 'merge') {
     if (!session.audioFiles) {
       session.audioFiles = [];
     }
     session.audioFiles.push(audio);
     userSessions.set(userId, session);
-    ctx.reply(`✅ تمت إضافة المقطع رقم ${session.audioFiles.length}. أرسل المقطع التالي أو اضغط /done للبدء في عملية الدمج.`);
+    ctx.reply(`✅ تمت إضافة المقطع رقم ${session.audioFiles.length}. أرسل التالي أو اضغط /done للدمج.`);
   }
 }
 
 /**
- * يقوم بقص مقطع الصوت باستخدام ffmpeg
+ * يقوم بقص مقطع الصوت
  * @param {import('telegraf').Context} ctx
  * @param {object} session
  */
 async function trimAudio(ctx, session) {
   const userId = ctx.from.id;
-  await ctx.reply('⏳ جاري قص المقطع الصوتي، يرجى الانتظار...');
+  await ctx.reply('⏳ جاري قص المقطع الصوتي...');
   
   const inputPath = path.join(__dirname, `${userId}_${Date.now()}_input.tmp`);
   const outputPath = path.join(__dirname, `${userId}_${Date.now()}_trimmed.mp3`);
@@ -97,9 +131,8 @@ async function trimAudio(ctx, session) {
 
   } catch (err) {
     console.error('Error in trimAudio:', err);
-    ctx.reply('❌ حدث خطأ فادح أثناء محاولة قص المقطع. يرجى المحاولة مرة أخرى.');
+    ctx.reply('❌ حدث خطأ أثناء قص المقطع.');
   } finally {
-    // تنظيف الجلسة والملفات المؤقتة في كل الحالات
     userSessions.delete(userId);
     if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
@@ -107,42 +140,38 @@ async function trimAudio(ctx, session) {
 }
 
 /**
- * يقوم بدمج عدة مقاطع صوتية في مقطع واحد
+ * يقوم بدمج عدة مقاطع صوتية
  * @param {import('telegraf').Context} ctx
  * @param {object} session
  */
 async function mergeAudio(ctx, session) {
     const userId = ctx.from.id;
-    await ctx.reply(`⏳ جاري دمج ${session.audioFiles.length} مقاطع، يرجى الانتظار...`);
+    await ctx.reply(`⏳ جاري دمج ${session.audioFiles.length} مقاطع...`);
 
     const tempDir = path.join(__dirname, `temp_${userId}_${Date.now()}`);
     fs.mkdirSync(tempDir, { recursive: true });
     
     const fileListPath = path.join(tempDir, 'filelist.txt');
     const outputPath = path.join(__dirname, `${userId}_${Date.now()}_merged.mp3`);
-    const downloadedFiles = [];
 
     try {
-        // تحميل كل الملفات وكتابة قائمة الملفات لـ ffmpeg
         for (let i = 0; i < session.audioFiles.length; i++) {
             const file = session.audioFiles[i];
             const fileLink = await ctx.telegram.getFileLink(file.file_id);
             const response = await fetch(fileLink.href);
             const audioBuffer = await response.arrayBuffer();
-            
-            const tempFilePath = path.join(tempDir, `audio_${i}.mp3`);
+            const originalFileName = file.file_name || 'audio.tmp';
+            const extension = path.extname(originalFileName);
+            const tempFilePath = path.join(tempDir, `audio_${i}${extension}`);
             fs.writeFileSync(tempFilePath, Buffer.from(audioBuffer));
-            downloadedFiles.push(tempFilePath);
-            // الصيغة المطلوبة لملف القائمة في ffmpeg
             fs.appendFileSync(fileListPath, `file '${path.resolve(tempFilePath)}'\n`);
         }
         
-        // تنفيذ أمر الدمج باستخدام ffmpeg
         await new Promise((resolve, reject) => {
             ffmpeg()
                 .input(fileListPath)
                 .inputOptions(['-f', 'concat', '-safe', '0'])
-                .outputOptions('-c', 'copy')
+                .audioBitrate('192k')
                 .output(outputPath)
                 .on('end', resolve)
                 .on('error', (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
@@ -153,21 +182,60 @@ async function mergeAudio(ctx, session) {
 
     } catch (err) {
         console.error('Error in mergeAudio:', err);
-        ctx.reply('❌ حدث خطأ فادح أثناء محاولة دمج المقاطع. يرجى التأكد من أن جميع الملفات بنفس الصيغة والمواصفات.');
+        ctx.reply('❌ حدث خطأ أثناء دمج المقاطع.');
     } finally {
-        // تنظيف شامل للجلسة وكل الملفات المؤقتة
         userSessions.delete(userId);
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
         if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
     }
 }
 
+/**
+ * دالة تحويل الفيديو إلى صوت
+ * @param {import('telegraf').Context} ctx
+ * @param {object} video
+ */
+async function handleConversion(ctx, video) {
+    const userId = ctx.from.id;
+    await ctx.reply('⏳ جاري تحويل الفيديو إلى صوت...');
+    
+    const inputPath = path.join(__dirname, `${userId}_${Date.now()}_input_video.tmp`);
+    const outputPath = path.join(__dirname, `${userId}_${Date.now()}_converted.mp3`);
+
+    try {
+        const fileLink = await ctx.telegram.getFileLink(video.file_id);
+        const response = await fetch(fileLink.href);
+        const videoBuffer = await response.arrayBuffer();
+        fs.writeFileSync(inputPath, Buffer.from(videoBuffer));
+
+        await new Promise((resolve, reject) => {
+            ffmpeg(inputPath)
+                .noVideo()
+                .audioCodec('libmp3lame')
+                .audioBitrate('192')
+                .save(outputPath)
+                .on('end', resolve)
+                .on('error', reject);
+        });
+
+        await ctx.replyWithAudio({ source: outputPath }, { caption: '✅ تم تحويل الفيديو إلى صوت بنجاح!' });
+
+    } catch (err) {
+        console.error('Error in handleConversion:', err);
+        ctx.reply('❌ حدث خطأ أثناء تحويل الفيديو.');
+    } finally {
+        userSessions.delete(userId);
+        if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    }
+}
+
 
 /**
  * خوارزمية تشفير مخصصة
- * @param {string} text النص المراد تشفيره
- * @param {number} complexity مستوى التعقيد
- * @returns {string} النص المشفر
+ * @param {string} text
+ * @param {number} complexity
+ * @returns {string}
  */
 function customEncrypt(text, complexity) {
     let currentText = text;
@@ -184,12 +252,12 @@ function customEncrypt(text, complexity) {
 
 /**
  * خوارزمية فك تشفير مخصصة
- * @param {string} encryptedText النص المشفر
- * @returns {string} النص الأصلي
+ * @param {string} encryptedText
+ * @returns {string}
  */
 function customDecrypt(encryptedText) {
     if (!encryptedText.startsWith('ARv6-')) {
-        throw new Error("صيغة النص المشفر غير صحيحة. يجب أن يبدأ بـ 'ARv6-'.");
+        throw new Error("صيغة النص المشفر غير صحيحة.");
     }
     const parts = encryptedText.split('-');
     if (parts.length < 3) {
@@ -210,196 +278,176 @@ function customDecrypt(encryptedText) {
 }
 
 
-// --- منطق البوت ومعالجات الأوامر (مرتبة حسب الأولوية) ---
+// --- منطق البوت ومعالجات الأوامر ---
 
-// 1. أمر البدء والإلغاء
 bot.start((ctx) => {
-  userSessions.delete(ctx.from.id); // إعادة تعيين أي جلسة سابقة
+  userSessions.delete(ctx.from.id);
   return ctx.reply(
-    '🎵 أهلاً بك! اختر القسم الذي تريده من القائمة بالأسفل:',
+    '🎵 أهلاً بك! اختر القسم الذي تريده:',
     Markup.keyboard([
-      ['🎧 تعديل معلومات أغنية', '✂️ قص أغنية'],
-      ['🎶 دمج مقاطع صوتية', '🔐 تشفير / فك تشفير']
+      ['🎧 تعديل أغنية', '✂️ قص أغنية'],
+      ['🎶 دمج مقاطع', '🔐 تشفير / فك'],
+      ['📥 تحميل', '🔄 حولني']
     ]).resize()
   );
 });
 
 bot.command('cancel', (ctx) => {
     userSessions.delete(ctx.from.id);
-    ctx.reply('👍 تم إلغاء العملية الحالية. يمكنك البدء من جديد باختيار أحد الخيارات.');
+    ctx.reply('👍 تم إلغاء العملية الحالية.');
 });
 
-
-// 2. معالجات القائمة الرئيسية
-bot.hears('🎧 تعديل معلومات أغنية', (ctx) => {
+bot.hears('🎧 تعديل أغنية', (ctx) => {
   userSessions.set(ctx.from.id, { mode: 'edit' });
-  ctx.reply('📤 ممتاز! الآن أرسل ملف الأغنية الذي تريد تعديله. لإلغاء العملية أرسل /cancel');
+  ctx.reply('📤 أرسل ملف الأغنية للتعديل.');
 });
 
 bot.hears('✂️ قص أغنية', (ctx) => {
   userSessions.set(ctx.from.id, { mode: 'trim' });
-  ctx.reply('📤 حسنًا، أرسل ملف الأغنية التي تريد قصها. لإلغاء العملية أرسل /cancel');
+  ctx.reply('📤 أرسل ملف الأغنية للقص.');
 });
 
-bot.hears('🎶 دمج مقاطع صوتية', (ctx) => {
+bot.hears('🎶 دمج مقاطع', (ctx) => {
     userSessions.set(ctx.from.id, { mode: 'merge', audioFiles: [] });
-    ctx.reply('📤 ممتاز! أرسل المقطع الصوتي الأول.\nعندما تنتهي من إرسال كل المقاطع، اضغط /done للدمج.\nلإلغاء العملية أرسل /cancel');
+    ctx.reply('📤 أرسل المقطع الصوتي الأول.');
 });
 
-bot.hears('🔐 تشفير / فك تشفير', (ctx) => {
+bot.hears('🔐 تشفير / فك', (ctx) => {
   userSessions.set(ctx.from.id, { mode: 'crypto' });
-  ctx.reply(`🧪 أرسل الأمر بالتنسيق الصحيح:
-
-لتشفير نص (مستوى التعقيد من 1 إلى 10):
-\`/encrypt 5 هذا نص تجريبي\`
-
-لفك تشفير نص:
-\`/decrypt ARv6-...\`
-`, { parse_mode: 'Markdown' });
+  ctx.reply('🧪 أرسل الأمر بالتنسيق الصحيح:\n\n`/encrypt 5 نص`\n`/decrypt ARv6-...`', { parse_mode: 'Markdown' });
 });
 
-// 3. معالجات الأوامر المحددة
-bot.command('done', async (ctx) => {
-    const userId = ctx.from.id;
-    const session = userSessions.get(userId);
+bot.hears('📥 تحميل', (ctx) => {
+    userSessions.set(ctx.from.id, { mode: 'download' });
+    ctx.reply('🔗 أرسل رابط الفيديو (يوتيوب، تيك توك، الخ) لتحميله كملف فيديو.');
+});
 
-    if (!session || session.mode !== 'merge') {
-        return ctx.reply('❗ لا يمكنك استخدام هذا الأمر الآن.');
+bot.hears('🔄 حولني', (ctx) => {
+    userSessions.set(ctx.from.id, { mode: 'convert' });
+    ctx.reply('📹 أرسل ملف الفيديو لتحويله إلى صوت.');
+});
+
+bot.command('done', async (ctx) => {
+    const session = userSessions.get(ctx.from.id);
+    if (!session || session.mode !== 'merge' || !session.audioFiles || session.audioFiles.length < 2) {
+        return ctx.reply('❗ يجب إرسال مقطعين على الأقل.');
     }
-    if (!session.audioFiles || session.audioFiles.length < 2) {
-        return ctx.reply('❗ يجب أن ترسل مقطعين صوتيين على الأقل لدمجهما.');
-    }
-    
     await mergeAudio(ctx, session);
 });
-
 
 bot.hears(/^\/encrypt\s+(\d+)\s+(.+)/s, (ctx) => {
     const complexity = parseInt(ctx.match[1], 10);
     const text = ctx.match[2];
-
     if (isNaN(complexity) || complexity < 1 || complexity > 10) {
-        return ctx.reply('❗ مستوى التعقيد يجب أن يكون رقمًا بين 1 و 10.');
+        return ctx.reply('❗ مستوى التعقيد يجب أن يكون بين 1 و 10.');
     }
     try {
         const encrypted = customEncrypt(text, complexity);
-        ctx.reply(`✅ تم التشفير بنجاح:\n\n\`${encrypted}\`\n\nيمكنك نسخ النص المشفر.`, { parse_mode: 'Markdown' });
+        ctx.reply(`✅ تم التشفير:\n\n\`${encrypted}\``, { parse_mode: 'Markdown' });
     } catch (e) {
-        ctx.reply(`❌ حدث خطأ أثناء التشفير: ${e.message}`);
+        ctx.reply(`❌ خطأ: ${e.message}`);
     }
 });
 
 bot.hears(/^\/decrypt\s+(ARv6-.+)/s, (ctx) => {
     try {
         const decrypted = customDecrypt(ctx.match[1]);
-        ctx.reply(`✅ تم فك التشفير بنجاح:\n\n${decrypted}`);
+        ctx.reply(`✅ تم فك التشفير:\n\n${decrypted}`);
     } catch (e) {
-        ctx.reply(`❌ خطأ في فك التشفير: ${e.message}`);
+        ctx.reply(`❌ خطأ: ${e.message}`);
     }
 });
 
 bot.command('skip', async (ctx) => {
-  const userId = ctx.from.id;
-  const session = userSessions.get(userId);
-
+  const session = userSessions.get(ctx.from.id);
   if (!session || session.mode !== 'edit' || !session.audio || !session.title || !session.artist) {
-    return ctx.reply('❗ لا يمكنك استخدام هذا الأمر الآن. يرجى إكمال الخطوات السابقة أولاً.');
+    return ctx.reply('❗ لا يمكنك استخدام هذا الأمر الآن.');
   }
-
-  await ctx.reply('⏳ جاري تعديل البيانات بدون صورة، يرجى الانتظار...');
-  const tempFile = path.join(__dirname, `${userId}_${Date.now()}_edited.mp3`);
-
+  await ctx.reply('⏳ جاري تعديل البيانات...');
+  const tempFile = path.join(__dirname, `${ctx.from.id}_edited.mp3`);
   try {
     const fileLink = await ctx.telegram.getFileLink(session.audio.file_id);
     const response = await fetch(fileLink.href);
     const audioBuffer = await response.arrayBuffer();
     fs.writeFileSync(tempFile, Buffer.from(audioBuffer));
-
-    const success = NodeID3.write({ title: session.title, artist: session.artist }, tempFile);
-    if (!success) throw new Error('فشل في كتابة بيانات ID3.');
-
-    await ctx.replyWithAudio(
-        { source: tempFile },
-        { title: session.title, performer: session.artist, caption: '✅ تم تعديل معلومات الأغنية بنجاح!' }
-    );
+    NodeID3.write({ title: session.title, artist: session.artist }, tempFile);
+    await ctx.replyWithAudio({ source: tempFile }, { caption: '✅ تم تعديل معلومات الأغنية!' });
   } catch (err) {
-    console.error('Error in /skip command:', err);
+    console.error('Error in /skip:', err);
     ctx.reply('❌ حدث خطأ أثناء تعديل الملف.');
   } finally {
-    userSessions.delete(userId);
+    userSessions.delete(ctx.from.id);
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
   }
 });
 
-// 4. معالجات الوسائط (صوت، صور)
+// معالجات الوسائط
 bot.on('audio', (ctx) => handleAudio(ctx));
+
+bot.on('video', async (ctx) => {
+    const session = userSessions.get(ctx.from.id);
+    if (session && session.mode === 'convert') {
+        await handleConversion(ctx, ctx.message.video);
+    }
+});
+
 bot.on('document', (ctx) => {
   const mime = ctx.message.document.mime_type || '';
   if (mime.startsWith('audio')) {
     handleAudio(ctx);
-  } else {
+  } else if (mime.startsWith('video')) {
     const session = userSessions.get(ctx.from.id);
-    if (session && (session.mode === 'edit' || session.mode === 'trim' || session.mode === 'merge')) {
-        ctx.reply('❗ الملف المرسل ليس ملفًا صوتيًا. يرجى إرسال ملف صوتي.');
+    if (session && session.mode === 'convert') {
+        handleConversion(ctx, ctx.message.document);
     }
   }
 });
 
 bot.on('photo', async (ctx) => {
-  const userId = ctx.from.id;
-  const session = userSessions.get(userId);
-
+  const session = userSessions.get(ctx.from.id);
   if (!session || session.mode !== 'edit' || !session.audio || !session.title || !session.artist) {
-    return ctx.reply('❗ لا يمكنك إرسال صورة الآن. يرجى إكمال خطوات تعديل الأغنية أولاً.');
+    return ctx.reply('❗ لا يمكنك إرسال صورة الآن.');
   }
-
-  await ctx.reply('🖼️ تم استلام الصورة، جاري دمجها مع الأغنية...');
-  const tempFile = path.join(__dirname, `${userId}_${Date.now()}_final.mp3`);
-
+  await ctx.reply('🖼️ تم استلام الصورة، جاري دمجها...');
+  const tempFile = path.join(__dirname, `${ctx.from.id}_final.mp3`);
   try {
     const photo = ctx.message.photo[ctx.message.photo.length - 1];
     const photoLink = await ctx.telegram.getFileLink(photo.file_id);
     const imageResponse = await fetch(photoLink.href);
     const imageBuffer = await imageResponse.arrayBuffer();
-
     const audioLink = await ctx.telegram.getFileLink(session.audio.file_id);
     const audioResponse = await fetch(audioLink.href);
     const audioBuffer = await audioResponse.arrayBuffer();
     fs.writeFileSync(tempFile, Buffer.from(audioBuffer));
-
-    const success = NodeID3.write({
-      title: session.title,
-      artist: session.artist,
-      image: {
-        mime: 'image/jpeg',
-        type: { id: 3, name: 'front cover' },
-        description: 'Cover Art',
-        imageBuffer: Buffer.from(imageBuffer)
-      }
-    }, tempFile);
-    if (!success) throw new Error('فشل في كتابة بيانات ID3 مع الصورة.');
-
-    await ctx.replyWithAudio(
-        { source: tempFile },
-        { title: session.title, performer: session.artist, caption: '✅ تم تعديل الأغنية والصورة بنجاح!' }
-    );
+    NodeID3.write({ title: session.title, artist: session.artist, image: { mime: 'image/jpeg', type: { id: 3, name: 'front cover' }, description: 'Cover', imageBuffer: Buffer.from(imageBuffer) } }, tempFile);
+    await ctx.replyWithAudio({ source: tempFile }, { caption: '✅ تم تعديل الأغنية والصورة بنجاح!' });
   } catch (err) {
     console.error('Error in photo handler:', err);
-    ctx.reply('❌ حدث خطأ أثناء دمج الصورة مع الملف.');
+    ctx.reply('❌ حدث خطأ أثناء دمج الصورة.');
   } finally {
-    userSessions.delete(userId);
+    userSessions.delete(ctx.from.id);
     if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
   }
 });
 
-// 5. المعالج العام للرسائل النصية (يأتي في النهاية لضمان عدم تعارضه مع الأوامر)
+// المعالج العام للرسائل النصية
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
   const session = userSessions.get(userId);
   const text = ctx.message.text;
 
   if (text.startsWith('/')) return;
-  if (!session || !session.mode || session.mode === 'crypto' || session.mode === 'merge') return;
+  if (!session || !session.mode) return;
+  
+  if (session.mode === 'download') {
+      try {
+          new URL(text);
+          await handleDownload(ctx, text);
+      } catch (_) {
+          ctx.reply('❌ الرابط الذي أرسلته غير صالح.');
+      }
+      return;
+  }
 
   if (session.mode === 'edit') {
     if (!session.audio) return;
@@ -408,21 +456,21 @@ bot.on('text', async (ctx) => {
       ctx.reply('👤 رائع، الآن أرسل اسم الفنان:');
     } else if (!session.artist) {
       session.artist = text;
-      ctx.reply('🖼️ ممتاز! الآن يمكنك إرسال صورة جديدة للأغنية، أو إرسال /skip لتخطي هذه الخطوة.');
+      ctx.reply('🖼️ ممتاز! الآن أرسل صورة جديدة، أو /skip للتخطي.');
     }
   } else if (session.mode === 'trim') {
     if (!session.audio) return;
     if (!session.hasOwnProperty('start')) {
       const startTime = parseFloat(text);
       if (isNaN(startTime) || startTime < 0) {
-        return ctx.reply('❌ وقت بداية غير صالح. الرجاء إرسال رقم صحيح (مثل 0 أو 15).');
+        return ctx.reply('❌ وقت بداية غير صالح.');
       }
       session.start = startTime;
-      ctx.reply('🛑 حسنًا، الآن أرسل وقت النهاية (بالثواني):');
+      ctx.reply('🛑 الآن أرسل وقت النهاية (بالثواني):');
     } else if (!session.hasOwnProperty('end')) {
       const endTime = parseFloat(text);
       if (isNaN(endTime) || endTime <= session.start) {
-        return ctx.reply('❌ وقت نهاية غير صالح. يجب أن يكون رقمًا وأكبر من وقت البداية.');
+        return ctx.reply('❌ وقت نهاية غير صالح.');
       }
       session.end = endTime;
       await trimAudio(ctx, session);
@@ -431,11 +479,40 @@ bot.on('text', async (ctx) => {
   if (userSessions.has(userId)) userSessions.set(userId, session);
 });
 
-// --- تشغيل البوت ---
-bot.launch();
-console.log('🤖 Bot has been launched and is running...');
 
-// معالجة إيقاف البوت بأمان لضمان عدم انقطاع أي عمليات
+// --- دالة تهيئة وتشغيل البوت ---
+async function initializeAndLaunch() {
+    try {
+        const ytDlpPath = path.join(__dirname, 'yt-dlp');
+        
+        if (!fs.existsSync(ytDlpPath)) {
+            console.log('Downloading yt-dlp binary, this may take a moment...');
+            await YtDlpWrap.downloadFromGithub(ytDlpPath);
+            console.log('yt-dlp binary downloaded successfully.');
+        } else {
+            console.log('yt-dlp binary already exists.');
+        }
+        
+        ytDlpWrap.setBinaryPath(ytDlpPath);
+
+        app.listen(port, () => {
+          console.log(`🚀 Web server has started on port ${port}`);
+        });
+
+        bot.launch();
+        console.log('🤖 Bot has been launched and is running...');
+
+    } catch (error) {
+        console.error('❌ Failed to initialize the bot:', error);
+        process.exit(1);
+    }
+}
+
+// بدء كل شيء
+initializeAndLaunch();
+
+
+// معالجة إيقاف البوت بأمان
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
