@@ -3,8 +3,15 @@ services:
     name: telegram-media-bot
     env: node
     plan: free
-    buildCommand: "npm install"
-    startCommand: "node index.js"
+    # buildpacks تخبر Render بتثبيت الأدوات اللازمة بالترتيب
     buildpacks:
-      - url: https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest
+      - url: https://github.com/heroku/heroku-buildpack-python # لتثبيت yt-dlp
+      - url: https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest # لتثبيت ffmpeg
+      - url: heroku/nodejs # لتشغيل بيئة Node.js
+    buildCommand: "pip install -r requirements.txt && npm install" # أمر البناء الجديد
+    startCommand: "node index.js"
+    envVars:
+      - key: BOT_TOKEN
+        # مهم: ضع التوكن هنا بدلاً من الكود ليكون آمنًا
+        value: "7892395794:AAHy-_f_ej0IT0ZLF1jzdXJDMccLiCrMrZA"
 
