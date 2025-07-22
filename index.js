@@ -15,12 +15,16 @@ import YouTube_ from 'youtube-sr';
 // الإعدادات الأساسية
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// لاستخدام شخصي، يمكن وضع التوكن هنا. لرفعه بشكل آمن على Render، يفضل استخدام متغيرات البيئة
-const token = process.env.BOT_TOKEN || "8016650868:AAGnDW9EaReXm98rcEqccL6HzI7S5M_4-Vc";
+// *** تعديل لـ Render: قراءة التوكن من متغيرات البيئة ***
+const token = process.env.BOT_TOKEN;
+if (!token) {
+  console.error('خطأ: توكن البوت (BOT_TOKEN) غير موجود في متغيرات البيئة.');
+  process.exit(1);
+}
 
 // تهيئة المكتبات
 const YtDlpWrap = YtDlpWrap_.default || YtDlpWrap_;
-const ytDlpWrap = new YtDlpWrap();
+const ytDlpWrap = new YtDlpWrap(); // لا نحتاج لتحديد المسار، سيتم إيجاده تلقائيًا
 const YouTube = YouTube_.default || YouTube_;
 const bot = new Telegraf(token);
 const userSessions = new Map();
@@ -32,41 +36,81 @@ app.get('/', (req, res) => res.send('🤖 Bot is alive and running!'));
 
 
 // =================================================================
-// 2. الدوال المساعدة والعمليات الأساسية (Helpers & Core Logic)
+// 2. الدوال المساعدة والعمليات الأساسية (تبقى كما هي)
+// =================================================================
+async function handleDownload(ctx, url, format) { /* ... الكود كما هو ... */ }
+async function handleEditSong(ctx, session) { /* ... الكود كما هو ... */ }
+async function applyAudioEffect(ctx, session, effect) { /* ... الكود كما هو ... */ }
+async function trimAudio(ctx, session) { /* ... الكود كما هو ... */ }
+async function mergeAudio(ctx, session) { /* ... الكود كما هو ... */ }
+async function handleConversion(ctx, videoFile) { /* ... الكود كما هو ... */ }
+function customEncrypt(text) { /* ... الكود كما هو ... */ }
+function customDecrypt(encryptedText) { /* ... الكود كما هو ... */ }
+// ... (الكود الكامل للدوال موجود في الأسفل)
+
+
+// =================================================================
+// 3. معالجات الأوامر الرئيسية والقائمة (تبقى كما هي)
+// =================================================================
+bot.start((ctx) => { /* ... */ });
+bot.command('cancel', (ctx) => { /* ... */ });
+// ... (الكود الكامل للمعالجات موجود في الأسفل)
+
+
+// =================================================================
+// 4. معالجات الأوامر الخاصة والوضع المباشر (تبقى كما هي)
+// =================================================================
+bot.command('skip', async (ctx) => { /* ... */ });
+bot.command('done', async (ctx) => { /* ... */ });
+bot.on('inline_query', async (ctx) => { /* ... */ });
+// ... (الكود الكامل للمعالجات موجود في الأسفل)
+
+
+// =================================================================
+// 5. المعالج الرئيسي للرسائل والملفات (تبقى كما هي)
+// =================================================================
+bot.on(['audio', 'video', 'document', 'photo'], async (ctx) => { /* ... */ });
+bot.on('text', async (ctx) => { /* ... */ });
+
+
+// =================================================================
+// 6. تهيئة وتشغيل البوت (نسخة Render المبسطة)
 // =================================================================
 
-/**
- * دالة شاملة لتحميل الفيديو أو الصوت من رابط
- */
+// بما أن yt-dlp و ffmpeg يتم تثبيتهما أثناء البناء،
+// كل ما نحتاجه هو تشغيل الخادم والبوت مباشرة.
+app.listen(port, () => console.log(`🚀 Web server has started on port ${port}`));
+bot.launch({ handlerTimeout: 600_000 }); // 10 دقائق
+console.log('🤖 Bot has been launched and is running...');
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+
+// --- الكود الكامل للدوال والمعالجات ---
 async function handleDownload(ctx, url, format) {
     const userId = ctx.from.id;
     const isCallback = ctx.updateType === 'callback_query';
     let processingMessage;
     let outputPath = ''; 
-
     try {
         if (isCallback) {
             processingMessage = await ctx.editMessageText('⏳ جاري التحميل...');
         } else {
             processingMessage = await ctx.reply('⏳ جاري التحميل...');
         }
-    
         const extension = format === 'video' ? 'mp4' : 'mp3';
         outputPath = path.join(__dirname, `${userId}_${Date.now()}_download.${extension}`);
-
         const videoFormatArgs = ['-f', 'best[ext=mp4]/best'];
         const audioFormatArgs = ['-x', '--audio-format', 'mp3', '--audio-quality', '0'];
         const dlpArgs = format === 'video' ? videoFormatArgs : audioFormatArgs;
-
         await ytDlpWrap.execPromise([url, ...dlpArgs, '-o', outputPath]);
-
         if (fs.existsSync(outputPath)) {
             const replyMethod = format === 'video' ? ctx.replyWithVideo : ctx.replyWithAudio;
             await replyMethod.call(ctx, { source: outputPath }, { caption: '✅ تم التحميل بنجاح!' });
         } else {
             throw new Error('لم يتم العثور على الملف الناتج.');
         }
-
     } catch (err) {
         console.error('Error in handleDownload:', err);
         let errorMessage = '❌ حدث خطأ أثناء التحميل.';
@@ -80,10 +124,6 @@ async function handleDownload(ctx, url, format) {
         }
     }
 }
-
-/**
- * دالة تعديل معلومات الأغنية
- */
 async function handleEditSong(ctx, session) {
     const userId = ctx.from.id;
     await ctx.reply('⏳ جاري تعديل معلومات الأغنية...');
@@ -93,21 +133,12 @@ async function handleEditSong(ctx, session) {
         const audioResponse = await fetch(audioLink.href);
         const audioBuffer = await audioResponse.arrayBuffer();
         fs.writeFileSync(tempFile, Buffer.from(audioBuffer));
-
         const tags = { title: session.title, artist: session.artist };
-
         if (session.image) {
-            tags.image = {
-                mime: 'image/jpeg',
-                type: { id: 3, name: 'front cover' },
-                description: 'Cover Art',
-                imageBuffer: session.image
-            };
+            tags.image = { mime: 'image/jpeg', type: { id: 3, name: 'front cover' }, description: 'Cover Art', imageBuffer: session.image };
         }
-
         NodeID3.write(tags, tempFile);
         await ctx.replyWithAudio({ source: tempFile }, { caption: '✅ تم تعديل معلومات الأغنية بنجاح!' });
-
     } catch (err) {
         console.error('Error in handleEditSong:', err);
         ctx.reply('❌ حدث خطأ أثناء تعديل الملف.');
@@ -116,10 +147,6 @@ async function handleEditSong(ctx, session) {
         if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
     }
 }
-
-/**
- * دالة تطبيق المؤثرات الصوتية
- */
 async function applyAudioEffect(ctx, session, effect) {
     const userId = ctx.from.id;
     await ctx.editMessageText(`⏳ جاري تطبيق مؤثر "${effect.name}"...`);
@@ -130,12 +157,10 @@ async function applyAudioEffect(ctx, session, effect) {
         const response = await fetch(fileLink.href);
         const audioBuffer = await response.arrayBuffer();
         fs.writeFileSync(inputPath, Buffer.from(audioBuffer));
-
         await new Promise((resolve, reject) => {
             ffmpeg(inputPath).audioFilter(effect.filter).output(outputPath).on('end', resolve).on('error', reject).run();
         });
         await ctx.replyWithAudio({ source: outputPath }, { caption: `✅ تم تطبيق مؤثر "${effect.name}" بنجاح!` });
-
     } catch (err) {
         console.error(`Error applying effect ${effect.name}:`, err);
         ctx.reply(`❌ حدث خطأ أثناء تطبيق المؤثر.`);
@@ -146,10 +171,6 @@ async function applyAudioEffect(ctx, session, effect) {
         await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
     }
 }
-
-/**
- * دالة قص الصوت
- */
 async function trimAudio(ctx, session) {
   const userId = ctx.from.id;
   await ctx.reply('⏳ جاري قص المقطع الصوتي...');
@@ -160,7 +181,6 @@ async function trimAudio(ctx, session) {
     const response = await fetch(fileLink.href);
     const audioBuffer = await response.arrayBuffer();
     fs.writeFileSync(inputPath, Buffer.from(audioBuffer));
-
     await new Promise((resolve, reject) => {
       ffmpeg(inputPath).setStartTime(session.start).setDuration(session.end - session.start).output(outputPath).on('end', resolve).on('error', reject).run();
     });
@@ -174,10 +194,6 @@ async function trimAudio(ctx, session) {
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
   }
 }
-
-/**
- * دالة دمج المقاطع
- */
 async function mergeAudio(ctx, session) {
     const userId = ctx.from.id;
     await ctx.reply(`⏳ جاري دمج ${session.audioFiles.length} مقاطع...`);
@@ -208,10 +224,6 @@ async function mergeAudio(ctx, session) {
         if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
     }
 }
-
-/**
- * دالة لتحويل الفيديو إلى صوت
- */
 async function handleConversion(ctx, videoFile) {
     const userId = ctx.from.id;
     await ctx.reply('⏳ جاري تحويل الفيديو إلى صوت...');
@@ -222,7 +234,6 @@ async function handleConversion(ctx, videoFile) {
         const response = await fetch(fileLink.href);
         const videoBuffer = await response.arrayBuffer();
         fs.writeFileSync(inputPath, Buffer.from(videoBuffer));
-
         await new Promise((resolve, reject) => {
             ffmpeg(inputPath).noVideo().audioCodec('libmp3lame').audioBitrate('192').save(outputPath).on('end', resolve).on('error', reject);
         });
@@ -236,12 +247,8 @@ async function handleConversion(ctx, videoFile) {
         if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
     }
 }
-
-/**
- * دوال التشفير
- */
 function customEncrypt(text) {
-    const complexity = 5; // مستوى تعقيد ثابت
+    const complexity = 5;
     let currentText = text;
     for (let i = 0; i < complexity; i++) {
         currentText = Array.from(currentText).map((char, index) => String.fromCharCode(char.charCodeAt(0) ^ ((index % 128) ^ (i * 5 + 3)))).join('');
@@ -259,12 +266,6 @@ function customDecrypt(encryptedText) {
     }
     return currentText;
 }
-
-
-// =================================================================
-// 3. معالجات الأوامر الرئيسية والقائمة (Commands & Menu)
-// =================================================================
-
 bot.start((ctx) => {
   userSessions.delete(ctx.from.id);
   return ctx.reply(
@@ -277,10 +278,7 @@ bot.start((ctx) => {
     ]).resize()
   );
 });
-
 bot.command('cancel', (ctx) => { userSessions.delete(ctx.from.id); ctx.reply('👍 تم إلغاء العملية الحالية بنجاح.'); });
-
-// معالجات أزرار القائمة
 bot.hears('🎧 تعديل أغنية', (ctx) => { userSessions.set(ctx.from.id, { mode: 'edit' }); ctx.reply('📤 أرسل ملف الأغنية لتعديل معلوماته.'); });
 bot.hears('✂️ قص أغنية', (ctx) => { userSessions.set(ctx.from.id, { mode: 'trim' }); ctx.reply('📤 أرسل المقطع الصوتي لقصه.'); });
 bot.hears('🎶 دمج مقاطع', (ctx) => { userSessions.set(ctx.from.id, { mode: 'merge', audioFiles: [] }); ctx.reply('📤 أرسل المقطع الصوتي الأول. اضغط /done عند الانتهاء.'); });
@@ -288,7 +286,6 @@ bot.hears('🔄 حولني', (ctx) => { userSessions.set(ctx.from.id, { mode: 'c
 bot.hears('📥 تحميل من رابط', (ctx) => { userSessions.set(ctx.from.id, { mode: 'download' }); ctx.reply('🔗 أرسل الرابط:', Markup.inlineKeyboard([Markup.button.callback('🎬 فيديو', 'ask_video'), Markup.button.callback('🎵 صوت', 'ask_audio')])); });
 bot.hears('🔐 تشفير / فك', (ctx) => { userSessions.set(ctx.from.id, { mode: 'crypto' }); ctx.reply('🧪 لتشفير نص، أرسله مع حرف `t` في النهاية.\nلفك التشفير، أرسل النص المشفر مع حرف `y`.\n\nمثال للتشفير: `مرحبا t`\nمثال للفك: `ARv6-... y`', { parse_mode: 'Markdown' }); });
 bot.hears('🔊 مؤثرات صوتية', (ctx) => { userSessions.set(ctx.from.id, { mode: 'effects' }); ctx.reply('🎧 رائع! أرسل المقطع الصوتي الذي تريد إضافة مؤثرات إليه.'); });
-
 bot.action(/ask_(video|audio)/, async (ctx) => {
     const format = ctx.match[1];
     const session = userSessions.get(ctx.from.id) || { mode: 'download' };
@@ -296,12 +293,6 @@ bot.action(/ask_(video|audio)/, async (ctx) => {
     userSessions.set(ctx.from.id, session);
     await ctx.editMessageText(`👍 حسنًا، الآن أرسل الرابط ليتم تحميله كـ ${format}.`);
 });
-
-
-// =================================================================
-// 4. معالجات الأوامر الخاصة والوضع المباشر
-// =================================================================
-
 bot.command('skip', async (ctx) => {
     const session = userSessions.get(ctx.from.id);
     if (session && session.mode === 'edit' && session.audio && session.title && session.artist) {
@@ -310,7 +301,6 @@ bot.command('skip', async (ctx) => {
         ctx.reply('❗ لا يمكنك استخدام هذا الأمر الآن.');
     }
 });
-
 bot.command('done', async (ctx) => {
     const session = userSessions.get(ctx.from.id);
     if (session && session.mode === 'merge' && session.audioFiles && session.audioFiles.length >= 2) {
@@ -319,7 +309,6 @@ bot.command('done', async (ctx) => {
         ctx.reply('❗ يجب أن ترسل مقطعين على الأقل.');
     }
 });
-
 bot.on('inline_query', async (ctx) => {
     const query = ctx.inlineQuery.query;
     if (!query || query.length < 2) return;
@@ -336,11 +325,8 @@ bot.on('inline_query', async (ctx) => {
         await ctx.answerInlineQuery(results, { cache_time: 10 });
     } catch (error) { console.error('Inline query error:', error); }
 });
-
 bot.hears(/^\/select_format (.+)/, (ctx) => ctx.reply('🤔 اختر الصيغة المطلوبة:', Markup.inlineKeyboard([Markup.button.callback('🎬 فيديو', `dl_video_${ctx.match[1]}`), Markup.button.callback('🎵 صوت', `dl_audio_${ctx.match[1]}`)])));
 bot.action(/^dl_(video|audio)_(.+)/, (ctx) => handleDownload(ctx, `https://www.youtube.com/watch?v=${ctx.match[2]}`, ctx.match[1]));
-
-// معالجات أزرار المؤثرات الصوتية
 const effects = {
     '8d': { name: '8D Audio', filter: 'apulsator=hz=0.08, pan=stereo|c0<c0+c1|c1<c0+c1' },
     'pitch_low': { name: 'صوت عميق', filter: 'asetrate=44100*0.8,aresample=44100' },
@@ -354,21 +340,13 @@ bot.action(/^effect_(.+)/, async (ctx) => {
         await applyAudioEffect(ctx, session, effects[effectKey]);
     }
 });
-
-
-// =================================================================
-// 5. المعالج الرئيسي للرسائل والملفات (Main Dispatcher)
-// =================================================================
-
 bot.on(['audio', 'video', 'document', 'photo'], async (ctx) => {
     const userId = ctx.from.id;
     const session = userSessions.get(userId);
     if (!session || !session.mode) return;
-
     const message = ctx.message;
     const file = message.audio || message.video || message.document || (message.photo && message.photo.slice(-1)[0]);
     const mime = file.mime_type || (message.photo ? 'image/jpeg' : '');
-
     switch (session.mode) {
         case 'edit':
             if (!session.audio && mime.startsWith('audio/')) {
@@ -414,23 +392,20 @@ bot.on(['audio', 'video', 'document', 'photo'], async (ctx) => {
             break;
     }
 });
-
 bot.on('text', async (ctx) => {
     const userId = ctx.from.id;
     const session = userSessions.get(userId);
     const text = ctx.message.text;
-
-    // معالج التشفير والفك الجديد (أعلى أولوية)
     const cryptoRegex = /^(.*)\s+(t|y)$/s;
     const cryptoMatch = text.match(cryptoRegex);
-    if (cryptoMatch) {
+    if (session && session.mode === 'crypto' && cryptoMatch) {
         const content = cryptoMatch[1];
         const action = cryptoMatch[2];
         try {
             if (action === 't') {
                 const encrypted = customEncrypt(content);
                 ctx.reply(`✅ تم التشفير:\n\n\`${encrypted}\``, { parse_mode: 'Markdown' });
-            } else { // action === 'y'
+            } else {
                 const decrypted = customDecrypt(content);
                 ctx.reply(`✅ تم فك التشفير:\n\n${decrypted}`);
             }
@@ -439,18 +414,13 @@ bot.on('text', async (ctx) => {
         }
         return;
     }
-
-    // معالج التحميل المباشر للروابط
     const urlRegex = /(https?:\/\/(?:www\.)?(?:(m\.)?youtube\.com|youtu\.be|tiktok\.com|instagram\.com)\/[^\s]+)/;
     const urlMatch = text.match(urlRegex);
     if (urlMatch) {
         await handleDownload(ctx, urlMatch[0], 'video');
         return;
     }
-
     if (text.startsWith('/') || !session || !session.mode) return;
-  
-    // معالجات الأقسام المعتمدة على الجلسات
     switch (session.mode) {
         case 'download':
             if (session.downloadFormat) {
@@ -490,12 +460,6 @@ bot.on('text', async (ctx) => {
             break;
     }
 });
-
-
-// =================================================================
-// 6. تهيئة وتشغيل البوت (Initialization & Launch)
-// =================================================================
-
 async function initializeAndLaunch() {
     try {
         const ytDlpPath = path.join(__dirname, 'yt-dlp');
@@ -507,19 +471,15 @@ async function initializeAndLaunch() {
             console.log('yt-dlp binary already exists.');
         }
         ytDlpWrap.setBinaryPath(ytDlpPath);
-
         app.listen(port, () => console.log(`🚀 Web server has started on port ${port}`));
         bot.launch({ handlerTimeout: 600_000 });
-        
         console.log('🤖 Bot has been launched and is running...');
     } catch (error) {
         console.error('❌ Failed to initialize the bot:', error);
         process.exit(1);
     }
 }
-
 initializeAndLaunch();
-
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
