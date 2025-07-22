@@ -15,9 +15,10 @@ import YouTube_ from 'youtube-sr';
 // الإعدادات الأساسية
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const token = process.env.BOT_TOKEN; // قراءة التوكن من متغيرات بيئة Render
+const token = process.env.BOT_TOKEN || "7892395794:AAHy-_f_ej0IT0ZLF1jzdXJDMccLiCrMrZA";
+
 if (!token) {
-  console.error('خطأ: توكن البوت (BOT_TOKEN) غير موجود في متغيرات البيئة.');
+  console.error('خطأ: توكن البوت (BOT_TOKEN) غير موجود.');
   process.exit(1);
 }
 
@@ -43,24 +44,30 @@ async function handleDownload(ctx, url, format) {
     const isCallback = ctx.updateType === 'callback_query';
     let processingMessage;
     let outputPath = ''; 
+
     try {
         if (isCallback) {
             processingMessage = await ctx.editMessageText('⏳ جاري التحميل...');
         } else {
             processingMessage = await ctx.reply('⏳ جاري التحميل...');
         }
+    
         const extension = format === 'video' ? 'mp4' : 'mp3';
         outputPath = path.join(__dirname, `${userId}_${Date.now()}_download.${extension}`);
+
         const videoFormatArgs = ['-f', 'best[ext=mp4]/best'];
         const audioFormatArgs = ['-x', '--audio-format', 'mp3', '--audio-quality', '0'];
         const dlpArgs = format === 'video' ? videoFormatArgs : audioFormatArgs;
+
         await ytDlpWrap.execPromise([url, ...dlpArgs, '-o', outputPath]);
+
         if (fs.existsSync(outputPath)) {
             const replyMethod = format === 'video' ? ctx.replyWithVideo : ctx.replyWithAudio;
             await replyMethod.call(ctx, { source: outputPath }, { caption: '✅ تم التحميل بنجاح!' });
         } else {
             throw new Error('لم يتم العثور على الملف الناتج.');
         }
+
     } catch (err) {
         console.error('Error in handleDownload:', err);
         let errorMessage = '❌ حدث خطأ أثناء التحميل.';
@@ -382,75 +389,76 @@ bot.on('text', async (ctx) => {
     const session = userSessions.get(userId);
     const text = ctx.message.text;
 
-    // معالج التحميل المباشر للروابط (أعلى أولوية)
+    if (text.startsWith('/')) return; // تجاهل الأوامر مثل /start, /skip, /done
+
+    // *** إصلاح منطق التحميل والتشفير ***
+    // الخطوة 1: تحقق مما إذا كان المستخدم في جلسة نشطة
+    if (session && session.mode) {
+        switch (session.mode) {
+            case 'crypto':
+                const cryptoRegex = /^(.*)\s+(t|y)$/s;
+                const cryptoMatch = text.match(cryptoRegex);
+                if (cryptoMatch) {
+                    const content = cryptoMatch[1];
+                    const action = cryptoMatch[2];
+                    try {
+                        if (action === 't') {
+                            const encrypted = customEncrypt(content);
+                            ctx.reply(`✅ تم التشفير:\n\n\`${encrypted}\``, { parse_mode: 'Markdown' });
+                        } else {
+                            const decrypted = customDecrypt(content);
+                            ctx.reply(`✅ تم فك التشفير:\n\n${decrypted}`);
+                        }
+                    } catch (e) { ctx.reply(`❌ حدث خطأ: ${e.message}`); }
+                } else {
+                    ctx.reply('❗ صيغة غير صحيحة. يرجى إرسال النص متبوعًا بـ `t` للتشفير أو `y` للفك.');
+                }
+                return; // إنهاء المعالجة هنا
+            case 'download':
+                if (session.downloadFormat) {
+                    try {
+                        new URL(text);
+                        await handleDownload(ctx, text, session.downloadFormat);
+                        userSessions.delete(userId);
+                    } catch (_) {
+                        ctx.reply('❌ الرابط الذي أرسلته غير صالح.');
+                    }
+                }
+                return;
+            case 'trim':
+                if (!session.audio) return;
+                const timeRangeRegex = /^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/;
+                const match = text.match(timeRangeRegex);
+                if (!match) return ctx.reply('❌ صيغة الوقت غير صحيحة. مثال: `0:15-1:30`');
+                const timeToSeconds = (ts) => ts.split(':').map(Number).reduce((acc, val) => acc * 60 + val, 0);
+                const start = timeToSeconds(match[1]);
+                const end = timeToSeconds(match[2]);
+                if (isNaN(start) || isNaN(end) || end <= start) return ctx.reply('❌ أوقات غير صالحة.');
+                session.start = start;
+                session.end = end;
+                await trimAudio(ctx, session);
+                return;
+            case 'edit':
+                if (!session.audio) return;
+                if (!session.title) {
+                    session.title = text;
+                    userSessions.set(userId, session);
+                    ctx.reply('👤 رائع، الآن أرسل اسم الفنان:');
+                } else if (!session.artist) {
+                    session.artist = text;
+                    userSessions.set(userId, session);
+                    ctx.reply('🖼️ ممتاز! الآن أرسل صورة جديدة، أو اضغط /skip للتخطي.');
+                }
+                return;
+        }
+    }
+
+    // الخطوة 2: إذا لم يكن المستخدم في جلسة، تحقق من وجود رابط للتحميل المباشر
     const urlRegex = /(https?:\/\/(?:www\.)?(?:(m\.)?youtube\.com|youtu\.be|tiktok\.com|instagram\.com)\/[^\s]+)/;
     const urlMatch = text.match(urlRegex);
     if (urlMatch) {
         await handleDownload(ctx, urlMatch[0], 'video');
         return;
-    }
-
-    // إذا لم تكن الرسالة رابطًا، تحقق من الجلسات
-    if (!session || !session.mode) return;
-
-    switch (session.mode) {
-        case 'crypto':
-            const cryptoRegex = /^(.*)\s+(t|y)$/s;
-            const cryptoMatch = text.match(cryptoRegex);
-            if (cryptoMatch) {
-                const content = cryptoMatch[1];
-                const action = cryptoMatch[2];
-                try {
-                    if (action === 't') {
-                        const encrypted = customEncrypt(content);
-                        ctx.reply(`✅ تم التشفير:\n\n\`${encrypted}\``, { parse_mode: 'Markdown' });
-                    } else {
-                        const decrypted = customDecrypt(content);
-                        ctx.reply(`✅ تم فك التشفير:\n\n${decrypted}`);
-                    }
-                } catch (e) {
-                    ctx.reply(`❌ حدث خطأ: ${e.message}`);
-                }
-            } else {
-                ctx.reply('❗ صيغة غير صحيحة. يرجى إرسال النص متبوعًا بـ `t` للتشفير أو `y` للفك.');
-            }
-            break;
-        case 'download':
-            if (session.downloadFormat) {
-                try {
-                    new URL(text);
-                    await handleDownload(ctx, text, session.downloadFormat);
-                    userSessions.delete(userId);
-                } catch (_) {
-                    ctx.reply('❌ الرابط الذي أرسلته غير صالح.');
-                }
-            }
-            break;
-        case 'trim':
-            if (!session.audio) return;
-            const timeRangeRegex = /^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/;
-            const match = text.match(timeRangeRegex);
-            if (!match) return ctx.reply('❌ صيغة الوقت غير صحيحة. مثال: `0:15-1:30`');
-            const timeToSeconds = (ts) => ts.split(':').map(Number).reduce((acc, val) => acc * 60 + val, 0);
-            const start = timeToSeconds(match[1]);
-            const end = timeToSeconds(match[2]);
-            if (isNaN(start) || isNaN(end) || end <= start) return ctx.reply('❌ أوقات غير صالحة.');
-            session.start = start;
-            session.end = end;
-            await trimAudio(ctx, session);
-            break;
-        case 'edit':
-            if (!session.audio) return;
-            if (!session.title) {
-                session.title = text;
-                userSessions.set(userId, session);
-                ctx.reply('👤 رائع، الآن أرسل اسم الفنان:');
-            } else if (!session.artist) {
-                session.artist = text;
-                userSessions.set(userId, session);
-                ctx.reply('🖼️ ممتاز! الآن أرسل صورة جديدة، أو اضغط /skip للتخطي.');
-            }
-            break;
     }
 });
 
